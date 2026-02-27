@@ -1,0 +1,326 @@
+const STORAGE_KEYS = {
+  users: "bank_users",
+  session: "bank_session",
+  leaderboard: "bank_leaderboard"
+};
+
+const COMPANY_TURNOVER = 61612.55;
+
+const defaultBoard = {
+  deposits: [
+    { username: "Участник #1", amount: 245000, isPublic: false },
+    { username: "Участник #2", amount: 188500, isPublic: false },
+    { username: "Участник #3", amount: 145230, isPublic: false }
+  ],
+  loans: [
+    { username: "Участник #4", amount: 540000, isPublic: false },
+    { username: "Участник #5", amount: 332000, isPublic: false },
+    { username: "Участник #6", amount: 210500, isPublic: false }
+  ]
+};
+
+const loanRecords = [
+  { borrower: "Гвоздев Гриша", telegram: "@dev3xx", amount: 400, percent: 25, mustReturn: 500, lentAt: "10.04.2025", dueAt: "13.04.2025", returned: true, earned: 100, note: "" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 30, percent: 100, mustReturn: 60, lentAt: "18.04.2025", dueAt: "19.04.2025", returned: true, earned: 30, note: "" },
+  { borrower: "mrs new rock", telegram: "@sambukaya", amount: 300, percent: 33, mustReturn: 400, lentAt: "21.04.2025", dueAt: "30.04.2025", returned: true, earned: 100, note: "" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 300, percent: 17, mustReturn: 350, lentAt: "26.04.2025", dueAt: "30.04.2025", returned: true, earned: 50, note: "" },
+  { borrower: "Казино (Толя Сударве)", telegram: "@SpokEar", amount: 800, percent: 172, mustReturn: 2174.49, lentAt: "26.04.2025", dueAt: "03.05.2025", returned: true, earned: 1374.49, note: "" },
+  { borrower: "Анатолий Сударве", telegram: "@SpokEar", amount: 300, percent: 0, mustReturn: 300, lentAt: "02.05.2025", dueAt: "04.05.2025", returned: true, earned: 0, note: "" },
+  { borrower: "Гвоздев Гриша", telegram: "@dev3xx", amount: 2200, percent: 36, mustReturn: 3000, lentAt: "24.04.2025", dueAt: "05.05.2025", returned: true, earned: 800, note: "" },
+  { borrower: "Александр Новокшонов", telegram: "@strupik", amount: 700, percent: 43, mustReturn: 1000, lentAt: "26.04.2025", dueAt: "10.05.2025", returned: true, earned: 300, note: "" },
+  { borrower: "Александр Новокшонов", telegram: "@strupik", amount: 200, percent: 150, mustReturn: 500, lentAt: "27.04.2025", dueAt: "10.05.2025", returned: true, earned: 300, note: "" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 200, percent: 50, mustReturn: 300, lentAt: "09.05.2025", dueAt: "13.05.2025", returned: true, earned: 100, note: "" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 200, percent: 50, mustReturn: 300, lentAt: "09.05.2025", dueAt: "15.05.2025", returned: true, earned: 100, note: "" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 400, percent: 50, mustReturn: 600, lentAt: "10.05.2025", dueAt: "15.05.2025", returned: true, earned: 200, note: "" },
+  { borrower: "Анатолий Сударве", telegram: "@SpokEar", amount: 400, percent: 50, mustReturn: 599, lentAt: "14.05.2025", dueAt: "19.05.2025", returned: true, earned: 199, note: "Задержка до 25.05? В октябре вернул))" },
+  { borrower: "Родион Иванов", telegram: "@CIKAT1LO", amount: 500, percent: 60, mustReturn: 800, lentAt: "11.05.2025", dueAt: "20.05.2025", returned: true, earned: 300, note: "Вернул только 500, проценты отказался возвращать" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 250, percent: 40, mustReturn: 350, lentAt: "19.05.2025", dueAt: "21.05.2025", returned: true, earned: 100, note: "Обманул на 100 рублей комиссии" },
+  { borrower: "Дмитрий Разлуцкий", telegram: "@Cheblyatt", amount: 100, percent: null, mustReturn: 1700, lentAt: "21.05.2025", dueAt: "23.05.2025", returned: false, earned: 1600, note: "Старые долги: вернул 700, остался 1к" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 100, percent: 0, mustReturn: 100, lentAt: "21.05.2025", dueAt: "23.05.2025", returned: true, earned: 0, note: "Обман на комиссии" },
+  { borrower: "Родион Иванов", telegram: "@CIKAT1LO", amount: 1000, percent: 20, mustReturn: 1200, lentAt: "27.05.2025", dueAt: "27.05.2025", returned: true, earned: 2000, note: "Вернул 2к, красавчик" },
+  { borrower: "Гвоздев Гриша", telegram: "@dev3xx", amount: null, percent: null, mustReturn: 3000, lentAt: "27.05.2025", dueAt: "28.05.2025", returned: false, earned: 3000, note: "Тема с картами, не всё заплатил" },
+  { borrower: "Дмитрий Разлуцкий", telegram: "@Cheblyatt", amount: 2000, percent: null, mustReturn: 2000, lentAt: "28.05.2025", dueAt: "29.05.2025", returned: true, earned: 2000, note: "За создание проекта" },
+  { borrower: "Сергей Сахаров", telegram: "@hETnP8I2rXj3M7t", amount: 2000, percent: null, mustReturn: 2000, lentAt: "27.05.2025", dueAt: "30.05.2025", returned: true, earned: 2000, note: "За создание проекта" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 100, percent: 50, mustReturn: 150, lentAt: "21.05.2025", dueAt: "01.06.2025", returned: true, earned: 50, note: "Вернул раньше" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 400, percent: 50, mustReturn: 600, lentAt: "22.05.2025", dueAt: "01.06.2025", returned: true, earned: 200, note: "Вернул раньше" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 400, percent: 50, mustReturn: 600, lentAt: "25.05.2025", dueAt: "01.06.2025", returned: true, earned: 200, note: "Вернул раньше" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 130, percent: 54, mustReturn: 200, lentAt: "03.06.2025", dueAt: "07.06.2025", returned: true, earned: 70, note: "Если не вернет в срок — ЧС" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 100, percent: 50, mustReturn: 150, lentAt: "04.06.2025", dueAt: "07.06.2025", returned: true, earned: 50, note: "Вернул в тот же день" },
+  { borrower: "Дмитрий Разлуцкий", telegram: "@Cheblyatt", amount: 300, percent: 17, mustReturn: 350, lentAt: "07.06.2025", dueAt: "07.06.2025", returned: false, earned: 50, note: "Потерялся" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 200, percent: 50, mustReturn: 300, lentAt: "05.06.2025", dueAt: "09.06.2025", returned: true, earned: 100, note: "" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 201.06, percent: 24, mustReturn: 250, lentAt: "09.06.2025", dueAt: "11.06.2025", returned: true, earned: 48.94, note: "Вернул 240" },
+  { borrower: "Александр Новокшонов", telegram: "@strupik", amount: 5000, percent: 40, mustReturn: 7000, lentAt: "22.05.2025", dueAt: "15.06.2025", returned: true, earned: 2000, note: "Шутки про 6.5к, по факту закрыл" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 800, percent: 50, mustReturn: 1200, lentAt: "24.05.2025", dueAt: "15.06.2025", returned: true, earned: 400, note: "" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 240, percent: 50, mustReturn: 360, lentAt: "09.06.2025", dueAt: "15.06.2025", returned: true, earned: 120, note: "" },
+  { borrower: "СерГей Романенко", telegram: "@G_r_a_y_2_2_8", amount: 3000, percent: 9, mustReturn: 3260, lentAt: "09.06.2025", dueAt: "15.06.2025", returned: true, earned: 260, note: "Вернул 1400 частями" },
+  { borrower: "Элтун Гусейнов", telegram: "@Eltunchik_22", amount: 500, percent: 34, mustReturn: 668, lentAt: "27.02.2026", dueAt: "08.03.2026", returned: false, earned: 168, note: "Текущий долг" },
+  { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 700, percent: 20, mustReturn: 840, lentAt: "10.02.2026", dueAt: "15.02.2026", returned: true, earned: 140, note: "80 за задержку" }
+];
+
+const authToggle = document.getElementById("auth-toggle");
+const authDialog = document.getElementById("auth-dialog");
+const authForm = document.getElementById("auth-form");
+const closeAuth = document.getElementById("close-auth");
+const switchMode = document.getElementById("switch-mode");
+const authTitle = document.getElementById("auth-title");
+const submitAuth = document.getElementById("submit-auth");
+const userChip = document.getElementById("user-chip");
+const statsForm = document.getElementById("stats-form");
+const depositsList = document.getElementById("deposits-list");
+const loansList = document.getElementById("loans-list");
+const itemTemplate = document.getElementById("stat-item-template");
+const loanBookBody = document.getElementById("loan-book-body");
+const onlyUnknownCheckbox = document.getElementById("only-unknown");
+const loanSearchInput = document.getElementById("loan-search");
+const totalDealsNode = document.getElementById("total-deals");
+const returnedDealsNode = document.getElementById("returned-deals");
+const unknownDealsNode = document.getElementById("unknown-deals");
+const totalProfitNode = document.getElementById("total-profit");
+const turnoverNode = document.getElementById("turnover-kpi");
+const x123Node = document.getElementById("x123-kpi");
+
+let isRegisterMode = false;
+
+const readJSON = (key, fallback) => {
+  const value = localStorage.getItem(key);
+  return value ? JSON.parse(value) : fallback;
+};
+
+const saveJSON = (key, value) => {
+  localStorage.setItem(key, JSON.stringify(value));
+};
+
+const formatRub = (amount) =>
+  new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 2 }).format(amount);
+
+const formatOptionalRub = (amount) => (typeof amount === "number" ? formatRub(amount) : "—");
+const formatPercent = (value) => (typeof value === "number" ? `${value}%` : "—");
+const safe = (value) => String(value ?? "");
+
+const getUsers = () => readJSON(STORAGE_KEYS.users, []);
+const getSession = () => readJSON(STORAGE_KEYS.session, null);
+
+const getBoard = () => {
+  const saved = readJSON(STORAGE_KEYS.leaderboard, null);
+  if (saved) {
+    return saved;
+  }
+  saveJSON(STORAGE_KEYS.leaderboard, defaultBoard);
+  return defaultBoard;
+};
+
+const toSafeTag = (username) => (username.startsWith("@") ? username : `@${username}`);
+
+const renderBoard = () => {
+  const board = getBoard();
+  const renderList = (items, node) => {
+    node.innerHTML = "";
+    const sorted = [...items].sort((a, b) => b.amount - a.amount).slice(0, 10);
+    sorted.forEach((entry, index) => {
+      const clone = itemTemplate.content.cloneNode(true);
+      const nameNode = clone.querySelector(".name");
+      const amountNode = clone.querySelector(".amount");
+      const label = entry.isPublic ? entry.username : `Участник #${index + 1}`;
+      nameNode.textContent = label;
+      amountNode.textContent = formatRub(entry.amount);
+      node.append(clone);
+    });
+  };
+
+  renderList(board.deposits, depositsList);
+  renderList(board.loans, loansList);
+};
+
+const getFilteredLoanRecords = () => {
+  const search = loanSearchInput.value.trim().toLowerCase();
+  const onlyUnknown = onlyUnknownCheckbox.checked;
+
+  return loanRecords.filter((row) => {
+    if (onlyUnknown && row.returned) {
+      return false;
+    }
+
+    if (!search) {
+      return true;
+    }
+
+    return `${row.borrower} ${row.telegram} ${row.note}`.toLowerCase().includes(search);
+  });
+};
+
+const renderLoanBookStats = () => {
+  const totalDeals = loanRecords.length;
+  const returnedDeals = loanRecords.filter((row) => row.returned).length;
+  const unknownDeals = totalDeals - returnedDeals;
+  const totalProfit = loanRecords.reduce((sum, row) => sum + (typeof row.earned === "number" ? row.earned : 0), 0);
+  const x123 = COMPANY_TURNOVER ? (totalProfit / COMPANY_TURNOVER) * 100 : 0;
+
+  totalDealsNode.textContent = String(totalDeals);
+  returnedDealsNode.textContent = String(returnedDeals);
+  unknownDealsNode.textContent = String(unknownDeals);
+  totalProfitNode.textContent = formatRub(totalProfit);
+  turnoverNode.textContent = formatRub(COMPANY_TURNOVER);
+  x123Node.textContent = `${x123.toFixed(5)}%`;
+};
+
+const renderLoanBookTable = () => {
+  const rows = getFilteredLoanRecords();
+  loanBookBody.innerHTML = "";
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+
+    const borrowerCell = document.createElement("td");
+    borrowerCell.textContent = `${safe(row.borrower)} (${safe(row.telegram)})`;
+
+    const amountCell = document.createElement("td");
+    amountCell.textContent = formatOptionalRub(row.amount);
+
+    const percentCell = document.createElement("td");
+    percentCell.textContent = formatPercent(row.percent);
+
+    const mustReturnCell = document.createElement("td");
+    mustReturnCell.textContent = formatOptionalRub(row.mustReturn);
+
+    const lentAtCell = document.createElement("td");
+    lentAtCell.textContent = safe(row.lentAt);
+
+    const dueAtCell = document.createElement("td");
+    dueAtCell.textContent = safe(row.dueAt);
+
+    const returnedCell = document.createElement("td");
+    returnedCell.textContent = row.returned ? "+" : "?";
+
+    const earnedCell = document.createElement("td");
+    earnedCell.textContent = formatOptionalRub(row.earned);
+
+    const noteCell = document.createElement("td");
+    noteCell.textContent = row.note || "—";
+
+    tr.append(
+      borrowerCell,
+      amountCell,
+      percentCell,
+      mustReturnCell,
+      lentAtCell,
+      dueAtCell,
+      returnedCell,
+      earnedCell,
+      noteCell
+    );
+
+    loanBookBody.append(tr);
+  });
+};
+
+const updateSessionUI = () => {
+  const user = getSession();
+  if (!user) {
+    userChip.classList.add("hidden");
+    userChip.textContent = "";
+    statsForm.classList.add("hidden");
+    authToggle.textContent = "Войти / Зарегистрироваться";
+    return;
+  }
+
+  const telegramPart = user.telegram ? ` • Telegram: ${toSafeTag(user.telegram)}` : "";
+  userChip.textContent = `${user.username}${telegramPart}`;
+  userChip.classList.remove("hidden");
+  statsForm.classList.remove("hidden");
+  authToggle.textContent = "Сменить аккаунт";
+};
+
+const setAuthMode = (registerMode) => {
+  isRegisterMode = registerMode;
+  authTitle.textContent = registerMode ? "Регистрация" : "Авторизация";
+  submitAuth.textContent = registerMode ? "Создать аккаунт" : "Войти";
+  switchMode.textContent = registerMode ? "Перейти ко входу" : "Перейти к регистрации";
+};
+
+switchMode.addEventListener("click", () => setAuthMode(!isRegisterMode));
+authToggle.addEventListener("click", () => authDialog.showModal());
+closeAuth.addEventListener("click", () => authDialog.close());
+onlyUnknownCheckbox.addEventListener("change", renderLoanBookTable);
+loanSearchInput.addEventListener("input", renderLoanBookTable);
+
+authForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const formData = new FormData(authForm);
+  const username = String(formData.get("username") || "").trim();
+  const password = String(formData.get("password") || "").trim();
+  const telegramRaw = String(formData.get("telegram") || "").trim();
+  const telegram = telegramRaw.replace(/^@/, "");
+
+  if (!username || !password) {
+    return;
+  }
+
+  const users = getUsers();
+
+  if (isRegisterMode) {
+    const existing = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
+    if (existing) {
+      alert("Пользователь с таким логином уже существует.");
+      return;
+    }
+
+    users.push({ username, password, telegram });
+    saveJSON(STORAGE_KEYS.users, users);
+    saveJSON(STORAGE_KEYS.session, { username, telegram });
+    alert("Аккаунт успешно создан.");
+  } else {
+    const matched = users.find((u) => u.username === username && u.password === password);
+    if (!matched) {
+      alert("Неверный логин или пароль.");
+      return;
+    }
+
+    const updatedTelegram = telegram || matched.telegram;
+    if (updatedTelegram !== matched.telegram) {
+      matched.telegram = updatedTelegram;
+      saveJSON(STORAGE_KEYS.users, users);
+    }
+
+    saveJSON(STORAGE_KEYS.session, { username: matched.username, telegram: matched.telegram });
+  }
+
+  authDialog.close();
+  authForm.reset();
+  updateSessionUI();
+});
+
+statsForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const session = getSession();
+  if (!session) {
+    return;
+  }
+
+  const formData = new FormData(statsForm);
+  const deposit = Number(formData.get("deposit"));
+  const loan = Number(formData.get("loan"));
+  const shareName = Boolean(formData.get("shareName"));
+
+  if (Number.isNaN(deposit) || Number.isNaN(loan)) {
+    return;
+  }
+
+  const board = getBoard();
+  const clearOld = (list) => list.filter((entry) => entry.username !== session.username);
+
+  board.deposits = clearOld(board.deposits);
+  board.loans = clearOld(board.loans);
+
+  board.deposits.push({ username: session.username, amount: deposit, isPublic: shareName });
+  board.loans.push({ username: session.username, amount: loan, isPublic: shareName });
+
+  saveJSON(STORAGE_KEYS.leaderboard, board);
+  renderBoard();
+  statsForm.reset();
+});
+
+setAuthMode(false);
+updateSessionUI();
+renderBoard();
+renderLoanBookStats();
+renderLoanBookTable();

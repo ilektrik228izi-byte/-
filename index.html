@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Банк «Серьёзный Подход»</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div>
+        <h1>Банк «Серьёзный Подход»</h1>
+        <p>Прозрачные вклады и займы без лишней бюрократии.</p>
+      </div>
+      <div class="header-actions">
+        <button id="auth-toggle" class="btn">Войти / Зарегистрироваться</button>
+        <div id="user-chip" class="user-chip hidden"></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Главная информация</h2>
+        <div class="rates-grid">
+          <article>
+            <h3>Вклады</h3>
+            <p class="rate">до 11.5% годовых</p>
+            <ul>
+              <li>Минимальная сумма: 1 000 ₽</li>
+              <li>Пополнение без ограничений</li>
+              <li>Сроки: 3, 6, 12 месяцев</li>
+            </ul>
+          </article>
+          <article>
+            <h3>Займы</h3>
+            <p class="rate">от 9.9% годовых</p>
+            <ul>
+              <li>Сумма: от 5 000 до 2 000 000 ₽</li>
+              <li>Одобрение в течение 15 минут</li>
+              <li>Досрочное погашение без штрафов</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Топ по займам и вкладам</h2>
+        <p class="muted">
+          По умолчанию данные анонимные. Пользователь может добровольно открыть отображение своего логина в рейтинге.
+        </p>
+
+        <div class="leaderboards">
+          <div>
+            <h3>Топ вкладов</h3>
+            <ol id="deposits-list" class="stat-list"></ol>
+          </div>
+          <div>
+            <h3>Топ займов</h3>
+            <ol id="loans-list" class="stat-list"></ol>
+          </div>
+        </div>
+
+        <form id="stats-form" class="stats-form hidden">
+          <h4>Добавить свои данные в рейтинг</h4>
+          <label>
+            Сумма вклада (₽)
+            <input type="number" min="0" step="0.01" name="deposit" required />
+          </label>
+          <label>
+            Сумма займа (₽)
+            <input type="number" min="0" step="0.01" name="loan" required />
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="shareName" />
+            Показать мой логин в рейтинге
+          </label>
+          <button class="btn" type="submit">Сохранить в рейтинге</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Таблица займов (расширенная)</h2>
+        <p class="muted">Формат как в вашей таблице: процент, даты, возврат, прибыль, оборот и X123.</p>
+
+        <div class="loan-kpis">
+          <article class="kpi"><p>Всего сделок</p><strong id="total-deals">0</strong></article>
+          <article class="kpi"><p>✅ Вернули</p><strong id="returned-deals">0</strong></article>
+          <article class="kpi"><p>❓ Неизвестно</p><strong id="unknown-deals">0</strong></article>
+          <article class="kpi"><p>Чистая прибыль</p><strong id="total-profit">0 ₽</strong></article>
+          <article class="kpi"><p>Оборот</p><strong id="turnover-kpi">0 ₽</strong></article>
+          <article class="kpi"><p>X123 (прибыль/оборот)</p><strong id="x123-kpi">0%</strong></article>
+        </div>
+
+        <div class="filters">
+          <label class="checkbox-label">
+            <input type="checkbox" id="only-unknown" />
+            Показывать только ❓ Неизвестно
+          </label>
+          <label>
+            Поиск
+            <input id="loan-search" placeholder="Имя, @username или заметка" />
+          </label>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Заниматель</th>
+                <th>Сумма займа</th>
+                <th>Процент займа</th>
+                <th>Сколько должен вернуть</th>
+                <th>Занял</th>
+                <th>Должен вернуть</th>
+                <th>Вернул</th>
+                <th>Сколько я заработал</th>
+                <th>Итого / заметки</th>
+              </tr>
+            </thead>
+            <tbody id="loan-book-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card compact">
+        <h2>Оборот компании</h2>
+        <p class="turnover">6 161,55 ₽</p>
+      </section>
+
+      <section class="card compact">
+        <h2>Связь</h2>
+        <p>
+          Telegram:
+          <a href="https://t.me/Sick_X_People" target="_blank" rel="noreferrer noopener">@Sick_X_People</a>
+        </p>
+      </section>
+    </main>
+
+    <dialog id="auth-dialog">
+      <form id="auth-form" method="dialog">
+        <h2 id="auth-title">Авторизация</h2>
+        <label>
+          Логин
+          <input name="username" minlength="3" required />
+        </label>
+        <label>
+          Пароль
+          <input name="password" type="password" minlength="6" required />
+        </label>
+        <label>
+          Telegram (опционально)
+          <input name="telegram" placeholder="@username" pattern="^@?[A-Za-z0-9_]{5,}$" />
+        </label>
+
+        <div class="dialog-actions">
+          <button type="button" id="switch-mode" class="btn secondary">Перейти к регистрации</button>
+          <button type="submit" class="btn" id="submit-auth">Войти</button>
+        </div>
+        <button type="button" class="close-btn" id="close-auth" aria-label="Закрыть">×</button>
+      </form>
+    </dialog>
+
+    <template id="stat-item-template">
+      <li>
+        <span class="name"></span>
+        <span class="amount"></span>
+      </li>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
