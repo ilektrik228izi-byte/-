@@ -128,13 +128,43 @@ const coinGameLeaderboard = document.getElementById("coin-game-leaderboard");
 
 let isRegisterMode = false;
 
-const leaderboardPhrases = [
-  "Мечтает согреться вашими деньгами...",
-  "Пьедестал ждёт героя. Это можете быть вы!",
-  "Хочет, чтобы его заняли именно вы!",
-  "Третье место грустит без вас...",
-  "Заждались ваших тёплых?"
+const depositLeaderboardPhrases = [
+  "Ваш капитал может занять это место и начать работать уже сегодня.",
+  "Здесь любят дисциплину инвестора и регулярные пополнения.",
+  "Свободная строчка для тех, кто вкладывает с холодной головой.",
+  "Позиция ждёт инвестора, который умеет копить, а не откладывать.",
+  "Место для сильного депозита и уверенного роста портфеля.",
+  "Ваш вклад может стать новым ориентиром для всех участников.",
+  "Тут закрепляются те, кто превращает сбережения в систему.",
+  "Добавьте сумму — и эта строка начнёт приносить вес в рейтинге.",
+  "Пьедестал инвесторов открыт: время зафиксировать вашу позицию.",
+  "Вкладчики со стратегией поднимаются сюда быстрее остальных."
 ];
+
+const loanLeaderboardPhrases = [
+  "Эта заявка ждёт ответственного заёмщика с чётким планом возврата.",
+  "Место для тех, кому нужен быстрый займ без лишней бюрократии.",
+  "Займ может уйти первым, если вы готовы к условиям уже сейчас.",
+  "Здесь появляются заёмщики, которые возвращают точно в срок.",
+  "Строка для срочного запроса: берёте сейчас — закрываете вовремя.",
+  "Позиция для тех, кто берёт займ под конкретную задачу, а не на эмоциях.",
+  "Эта ячейка ждёт заёмщика, который ценит репутацию и дедлайны.",
+  "Нужны деньги в оборот? Тут отмечаются самые оперативные заявки.",
+  "Место для заёмщиков, у которых план погашения уже на руках.",
+  "Сильные заёмщики попадают сюда, когда действуют чётко и честно."
+];
+
+let leaderboardRenderTick = 0;
+
+const buildRotatedPhrases = (phrases, count, tick) => {
+  if (!phrases.length || count <= 0) {
+    return [];
+  }
+
+  const start = tick % phrases.length;
+  const rotated = [...phrases.slice(start), ...phrases.slice(0, start)];
+  return rotated.slice(0, count);
+};
 
 const trackBehavior = (eventName) => {
   const stats = readJSON(STORAGE_KEYS.behaviorStats, {});
@@ -416,31 +446,33 @@ const getBoard = () => {
 const toSafeTag = (username) => (username.startsWith("@") ? username : `@${username}`);
 
 const renderBoard = () => {
+  leaderboardRenderTick += 1;
   const board = getBoard();
-  const renderList = (items, node) => {
+  const renderList = (items, node, phrases, boardType) => {
     node.innerHTML = "";
     const sorted = [...items].sort((a, b) => b.amount - a.amount).slice(0, 10);
+    const dynamicPhrases = buildRotatedPhrases(phrases, sorted.length, leaderboardRenderTick);
     sorted.forEach((entry, index) => {
       const clone = itemTemplate.content.cloneNode(true);
       const nameNode = clone.querySelector(".name");
       const amountNode = clone.querySelector(".amount");
       const label = entry.isPublic ? entry.username : `Участник #${index + 1}`;
-      const phrase = leaderboardPhrases[index % leaderboardPhrases.length];
+      const phrase = dynamicPhrases[index] || phrases[index % phrases.length] || "Здесь может быть ваша история.";
       nameNode.textContent = label;
       amountNode.textContent = phrase;
       amountNode.title = "Нажми, если откликается";
       amountNode.style.cursor = "pointer";
       amountNode.addEventListener("click", () => {
-        trackBehavior(`phrase_click:${phrase}`);
+        trackBehavior(`phrase_click:${boardType}:${phrase}`);
         renderBehaviorStats();
       });
-      trackBehavior(`phrase_show:${phrase}`);
+      trackBehavior(`phrase_show:${boardType}:${phrase}`);
       node.append(clone);
     });
   };
 
-  renderList(board.deposits, depositsList);
-  renderList(board.loans, loansList);
+  renderList(board.deposits, depositsList, depositLeaderboardPhrases, "deposits");
+  renderList(board.loans, loansList, loanLeaderboardPhrases, "loans");
 };
 
 const getFilteredLoanRecords = () => {
