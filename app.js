@@ -387,7 +387,7 @@ const renderBoard = () => {
       const amountNode = clone.querySelector(".amount");
       const label = entry.isPublic ? entry.username : `Участник #${index + 1}`;
       nameNode.textContent = label;
-      amountNode.textContent = "Здесь можете оказаться именно ВЫ!";
+      amountNode.textContent = "Этому месту одиноко без вас...";
       node.append(clone);
     });
   };
