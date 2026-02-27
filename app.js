@@ -11,13 +11,15 @@ const CONFIDENTIAL_ALLOWED_USERS = ["sick_x_people", "admin", "dev3xx"];
 const COMPANY_TURNOVER = 61612.55;
 
 const TELEGRAM_BOT_USERNAME = "@username122333bot";
+const TON_WALLET_ADDRESS = "UQBu-4JdgbIdHIYqj2tUazFi9iQ3BIpypK-akdmbnT1KbO9Q";
 
 const PAYMENTS_CONFIG = {
   telegram_usdt: {
-    label: "Telegram-бот + USDT",
+    label: "Telegram-бот + крипта",
     recipient: TELEGRAM_BOT_USERNAME,
-    endpoint: "/api/payments/telegram-usdt/create",
-    network: "TRC20"
+    endpoint: "/api/payments/telegram-crypto/create",
+    network: "TON / USDT (TON)",
+    wallet: TON_WALLET_ADDRESS
   },
   donationalerts: {
     label: "DonationAlerts",
@@ -173,7 +175,10 @@ const renderPaymentsPrep = () => {
 
   paymentsActive.textContent = config.label;
   paymentsEndpoint.textContent = config.endpoint || "не задан (будет прямой перевод/ручная проверка)";
-  paymentsRecipient.textContent = config.recipient || "не задан";
+  const recipientLabel = config.wallet
+    ? `${config.recipient} • wallet: ${config.wallet}`
+    : config.recipient;
+  paymentsRecipient.textContent = recipientLabel || "не задан";
   paymentsCreateBtn.disabled = false;
   paymentsStatus.textContent = ready
     ? "✅ Сценарий подготовлен. Можно выдавать клиенту шаги оплаты."
@@ -229,7 +234,8 @@ const handlePaymentSubmit = async (event) => {
   if (paymentsMethod.value === "telegram_usdt") {
     const botName = config.recipient.replace(/^@/, "");
     const deepLink = `https://t.me/${botName}?start=pay_${encodeURIComponent(payload.amount)}`;
-    alert(`Отправьте клиенту: сумма ${payload.amount} USDT (${config.network}), бот ${config.recipient}.\nDeep link: ${deepLink}`);
+    const walletPart = config.wallet ? `\nTON address: ${config.wallet}` : "";
+    alert(`Отправьте клиенту: сумма ${payload.amount} (${config.network}), бот ${config.recipient}.\nDeep link: ${deepLink}${walletPart}`);
   } else {
     alert(`Отправьте клиенту DonationAlerts ссылку: ${config.recipient} и подтвердите платеж вручную.`);
   }
