@@ -119,6 +119,19 @@ main {
   gap: 0.55rem;
 }
 
+.access-lock {
+  border: 1px dashed #e09a00;
+  background: #fff9e6;
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+
+.access-lock p {
+  margin: 0.25rem 0 0;
+  color: #6e4e00;
+}
+
 .loan-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));

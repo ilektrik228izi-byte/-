@@ -78,10 +78,16 @@
         </form>
       </section>
 
-      <section class="card">
+      <section class="card" id="confidential-loans">
         <h2>Таблица займов (расширенная)</h2>
-        <p class="muted">Формат как в вашей таблице: процент, даты, возврат, прибыль, оборот и X123.</p>
+        <p class="muted">Конфиденциальный раздел: доступ только авторизованным пользователям с правом просмотра.</p>
 
+        <div id="confidential-lock" class="access-lock">
+          <strong>🔒 Доступ ограничен.</strong>
+          <p>Войдите под разрешённым аккаунтом и укажите код доступа для просмотра таблицы.</p>
+        </div>
+
+        <div id="confidential-content" class="hidden">
         <div class="loan-kpis">
           <article class="kpi"><p>Всего сделок</p><strong id="total-deals">0</strong></article>
           <article class="kpi"><p>✅ Вернули</p><strong id="returned-deals">0</strong></article>
@@ -120,6 +126,7 @@
             <tbody id="loan-book-body"></tbody>
           </table>
         </div>
+      </div>
       </section>
 
       <section class="card compact">
@@ -150,6 +157,10 @@
         <label>
           Telegram (опционально)
           <input name="telegram" placeholder="@username" pattern="^@?[A-Za-z0-9_]{5,}$" />
+        </label>
+        <label>
+          Код доступа к конфиденциальной таблице
+          <input name="accessCode" type="password" placeholder="Введите код (если есть доступ)" />
         </label>
 
         <div class="dialog-actions">

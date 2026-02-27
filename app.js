@@ -4,6 +4,9 @@ const STORAGE_KEYS = {
   leaderboard: "bank_leaderboard"
 };
 
+const CONFIDENTIAL_ACCESS_CODE = "BANK_PRIVATE_2026";
+const CONFIDENTIAL_ALLOWED_USERS = ["sick_x_people", "admin", "dev3xx"];
+
 const COMPANY_TURNOVER = 61612.55;
 
 const defaultBoard = {
@@ -78,6 +81,8 @@ const unknownDealsNode = document.getElementById("unknown-deals");
 const totalProfitNode = document.getElementById("total-profit");
 const turnoverNode = document.getElementById("turnover-kpi");
 const x123Node = document.getElementById("x123-kpi");
+const confidentialContent = document.getElementById("confidential-content");
+const confidentialLock = document.getElementById("confidential-lock");
 
 let isRegisterMode = false;
 
@@ -96,6 +101,24 @@ const formatRub = (amount) =>
 const formatOptionalRub = (amount) => (typeof amount === "number" ? formatRub(amount) : "—");
 const formatPercent = (value) => (typeof value === "number" ? `${value}%` : "—");
 const safe = (value) => String(value ?? "");
+
+const hasTablePermission = (session) => {
+  if (!session) {
+    return false;
+  }
+
+  const normalized = session.username.trim().toLowerCase();
+  const userAllowed = CONFIDENTIAL_ALLOWED_USERS.includes(normalized);
+  return userAllowed && session.confidentialAccess === true;
+};
+
+const updateConfidentialUI = () => {
+  const session = getSession();
+  const allowed = hasTablePermission(session);
+
+  confidentialContent.classList.toggle("hidden", !allowed);
+  confidentialLock.classList.toggle("hidden", allowed);
+};
 
 const getUsers = () => readJSON(STORAGE_KEYS.users, []);
 const getSession = () => readJSON(STORAGE_KEYS.session, null);
@@ -220,14 +243,17 @@ const updateSessionUI = () => {
     userChip.textContent = "";
     statsForm.classList.add("hidden");
     authToggle.textContent = "Войти / Зарегистрироваться";
+    updateConfidentialUI();
     return;
   }
 
   const telegramPart = user.telegram ? ` • Telegram: ${toSafeTag(user.telegram)}` : "";
-  userChip.textContent = `${user.username}${telegramPart}`;
+  const securePart = user.confidentialAccess ? " • Доступ к таблице: да" : "";
+  userChip.textContent = `${user.username}${telegramPart}${securePart}`;
   userChip.classList.remove("hidden");
   statsForm.classList.remove("hidden");
   authToggle.textContent = "Сменить аккаунт";
+  updateConfidentialUI();
 };
 
 const setAuthMode = (registerMode) => {
@@ -250,6 +276,7 @@ authForm.addEventListener("submit", (event) => {
   const password = String(formData.get("password") || "").trim();
   const telegramRaw = String(formData.get("telegram") || "").trim();
   const telegram = telegramRaw.replace(/^@/, "");
+  const accessCode = String(formData.get("accessCode") || "").trim();
 
   if (!username || !password) {
     return;
@@ -264,10 +291,15 @@ authForm.addEventListener("submit", (event) => {
       return;
     }
 
-    users.push({ username, password, telegram });
+    const confidentialAccess = accessCode === CONFIDENTIAL_ACCESS_CODE;
+    users.push({ username, password, telegram, confidentialAccess });
     saveJSON(STORAGE_KEYS.users, users);
-    saveJSON(STORAGE_KEYS.session, { username, telegram });
-    alert("Аккаунт успешно создан.");
+    saveJSON(STORAGE_KEYS.session, { username, telegram, confidentialAccess });
+    if (!confidentialAccess) {
+      alert("Аккаунт создан. Доступ к конфиденциальной таблице не выдан.");
+    } else {
+      alert("Аккаунт успешно создан с доступом к конфиденциальной таблице.");
+    }
   } else {
     const matched = users.find((u) => u.username === username && u.password === password);
     if (!matched) {
@@ -278,10 +310,18 @@ authForm.addEventListener("submit", (event) => {
     const updatedTelegram = telegram || matched.telegram;
     if (updatedTelegram !== matched.telegram) {
       matched.telegram = updatedTelegram;
-      saveJSON(STORAGE_KEYS.users, users);
     }
 
-    saveJSON(STORAGE_KEYS.session, { username: matched.username, telegram: matched.telegram });
+    if (accessCode === CONFIDENTIAL_ACCESS_CODE) {
+      matched.confidentialAccess = true;
+    }
+
+    saveJSON(STORAGE_KEYS.users, users);
+    saveJSON(STORAGE_KEYS.session, {
+      username: matched.username,
+      telegram: matched.telegram,
+      confidentialAccess: Boolean(matched.confidentialAccess)
+    });
   }
 
   authDialog.close();
@@ -324,3 +364,4 @@ updateSessionUI();
 renderBoard();
 renderLoanBookStats();
 renderLoanBookTable();
+updateConfidentialUI();
