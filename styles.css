@@ -191,6 +191,37 @@ main {
   margin-bottom: 0.8rem;
 }
 
+.action-bar {
+  gap: 10px;
+  padding: 10px;
+  background: var(--card);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.action-btn {
+  border: 2px solid var(--brand);
+  border-radius: 30px;
+  background: transparent;
+  color: var(--brand);
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+select.action-btn {
+  padding-right: 2rem;
+}
+
+.action-btn:hover {
+  background: var(--brand);
+  color: #fff;
+}
+
+.trust-extra {
+  margin: 0.2rem 0 0.8rem;
+  font-size: 0.92rem;
+}
+
 .insights {
   margin-bottom: 0.8rem;
 }
@@ -233,6 +264,21 @@ main {
   font-size: 1.2rem;
   background: radial-gradient(circle at 30% 30%, #ffe48a, #f5b700);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease, opacity 0.18s ease;
+}
+
+.coin:active {
+  transform: scale(0.92);
+}
+
+.coin.gold {
+  background: radial-gradient(circle at 30% 30%, #fff7b8, #ff9a1f);
+  box-shadow: 0 0 14px rgba(255, 168, 51, 0.8);
+}
+
+.coin.coin-pop {
+  transform: scale(1.35);
+  opacity: 0;
 }
 
 .btn:disabled {

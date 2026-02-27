@@ -104,6 +104,7 @@ const borrowerInsights = document.getElementById("borrower-insights");
 const behaviorStats = document.getElementById("behavior-stats");
 const publicTotalDealsNode = document.getElementById("public-total-deals");
 const publicTurnoverNode = document.getElementById("public-turnover");
+const publicExtraStatNode = document.getElementById("public-extra-stat");
 const totalDealsNode = document.getElementById("total-deals");
 const returnedDealsNode = document.getElementById("returned-deals");
 const unknownDealsNode = document.getElementById("unknown-deals");
@@ -129,29 +130,29 @@ const coinGameLeaderboard = document.getElementById("coin-game-leaderboard");
 let isRegisterMode = false;
 
 const depositLeaderboardPhrases = [
-  "Ваш капитал может занять это место и начать работать уже сегодня.",
-  "Здесь любят дисциплину инвестора и регулярные пополнения.",
-  "Свободная строчка для тех, кто вкладывает с холодной головой.",
-  "Позиция ждёт инвестора, который умеет копить, а не откладывать.",
-  "Место для сильного депозита и уверенного роста портфеля.",
-  "Ваш вклад может стать новым ориентиром для всех участников.",
-  "Тут закрепляются те, кто превращает сбережения в систему.",
-  "Добавьте сумму — и эта строка начнёт приносить вес в рейтинге.",
-  "Пьедестал инвесторов открыт: время зафиксировать вашу позицию.",
-  "Вкладчики со стратегией поднимаются сюда быстрее остальных."
+  "Мечтает согреться вашими сбережениями и вырасти в надёжный актив.",
+  "Хочет стать вашей финансовой подушкой и опорой на будущее.",
+  "Ваши деньги будут здесь как дома — спокойно и с доходом.",
+  "Тёплое местечко для холодных купюр и долгих планов.",
+  "Растёт и радуется, когда вы пополняете счёт вовремя.",
+  "Место для вашего капитала, который работает, а не спит.",
+  "Копилочка ждёт тёплые монетки и дисциплину инвестора.",
+  "Эта позиция любит тех, кто думает на месяцы вперёд.",
+  "Здесь начинается уютный путь к большой финансовой цели.",
+  "Ваш вклад может задать новый стандарт для всего топа."
 ];
 
 const loanLeaderboardPhrases = [
-  "Эта заявка ждёт ответственного заёмщика с чётким планом возврата.",
-  "Место для тех, кому нужен быстрый займ без лишней бюрократии.",
-  "Займ может уйти первым, если вы готовы к условиям уже сейчас.",
-  "Здесь появляются заёмщики, которые возвращают точно в срок.",
-  "Строка для срочного запроса: берёте сейчас — закрываете вовремя.",
-  "Позиция для тех, кто берёт займ под конкретную задачу, а не на эмоциях.",
-  "Эта ячейка ждёт заёмщика, который ценит репутацию и дедлайны.",
-  "Нужны деньги в оборот? Тут отмечаются самые оперативные заявки.",
-  "Место для заёмщиков, у которых план погашения уже на руках.",
-  "Сильные заёмщики попадают сюда, когда действуют чётко и честно."
+  "Поможет воплотить мечты уже сегодня и не откладывать старт.",
+  "Ждёт, чтобы поддержать вас в нужный момент без лишних слов.",
+  "Ваш старт к новым вершинам — берите и действуйте чётко.",
+  "Здесь рождаются возможности для тех, кто идёт в дело.",
+  "Даёт крылья, чтобы взлететь и закрыть задачи в срок.",
+  "Помогает не ждать, а делать, пока момент ещё горячий.",
+  "Ваш персональный финансовый трамплин к следующему шагу.",
+  "Эта строка для заёмщика, который держит слово и дедлайны.",
+  "Нужен импульс в оборот? Тут место для быстрых решений.",
+  "В топ попадают заёмщики, которые берут ответственно и возвращают вовремя."
 ];
 
 let leaderboardRenderTick = 0;
@@ -352,8 +353,10 @@ const cleanupCoins = () => {
 const spawnCoin = () => {
   const coin = document.createElement("button");
   coin.type = "button";
-  coin.className = "coin";
-  coin.textContent = "🪙";
+  const isGold = Math.random() < 0.1;
+  coin.className = `coin${isGold ? " gold" : ""}`;
+  coin.textContent = isGold ? "🪙✨" : "🪙";
+  coin.dataset.value = isGold ? "50" : "10";
 
   const width = coinGameArena.clientWidth - 44;
   const height = coinGameArena.clientHeight - 44;
@@ -361,9 +364,10 @@ const spawnCoin = () => {
   coin.style.top = `${Math.max(0, Math.floor(Math.random() * height))}px`;
 
   coin.addEventListener("click", () => {
-    gameScore += 10;
+    gameScore += Number(coin.dataset.value || 10);
     coinGameScore.textContent = String(gameScore);
-    coin.remove();
+    coin.classList.add("coin-pop");
+    setTimeout(() => coin.remove(), 120);
   });
 
   coinGameArena.append(coin);
@@ -510,6 +514,10 @@ const renderPublicTrustStats = () => {
   publicTotalDealsNode.textContent = `${loanRecords.length} человек`;
   const roundedTurnover = Math.round(COMPANY_TURNOVER);
   publicTurnoverNode.textContent = `${new Intl.NumberFormat("ru-RU").format(roundedTurnover)} ₽`;
+
+  const avgDeal = loanRecords.length ? COMPANY_TURNOVER / loanRecords.length : 0;
+  const totalProfit = loanRecords.reduce((sum, row) => sum + (typeof row.earned === "number" ? row.earned : 0), 0);
+  publicExtraStatNode.textContent = `Средняя сделка: ${formatRub(avgDeal)} • Заработано для вас: ${formatRub(totalProfit)}`;
 };
 
 const renderLoanBookStats = () => {
@@ -704,6 +712,16 @@ coinGameStart.addEventListener("click", () => {
   startCoinGame();
 });
 
+const grantWelcomeBonus = (username) => {
+  const board = getBoard();
+  board.deposits = board.deposits.filter((entry) => entry.username !== username);
+  board.deposits.push({ username, amount: 100, isPublic: false });
+  saveJSON(STORAGE_KEYS.leaderboard, board);
+  trackBehavior("welcome_bonus_granted");
+  renderBoard();
+  renderBehaviorStats();
+};
+
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const formData = new FormData(authForm);
@@ -731,11 +749,11 @@ authForm.addEventListener("submit", (event) => {
     saveJSON(STORAGE_KEYS.users, users);
     saveJSON(STORAGE_KEYS.session, { username, telegram, confidentialAccess });
     trackBehavior("register_success");
-    renderBehaviorStats();
+    grantWelcomeBonus(username);
     if (!confidentialAccess) {
-      alert("Аккаунт создан. Доступ к конфиденциальной таблице не выдан.");
+      alert(`🎁 ${username}, вам начислен приветственный бонус 100 ₽ во вклад! Аккаунт создан, доступ к конфиденциальной таблице не выдан.`);
     } else {
-      alert("Аккаунт успешно создан с доступом к конфиденциальной таблице.");
+      alert(`🎁 ${username}, вам начислен приветственный бонус 100 ₽ во вклад! Доступ к конфиденциальной таблице открыт.`);
     }
   } else {
     const matched = users.find((u) => u.username === username && u.password === password);

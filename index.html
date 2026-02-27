@@ -47,6 +47,7 @@
       <section class="card trust-strip">
         <h2>Открытая статистика</h2>
         <p class="muted">Присоединяйся к своим! 🔥</p>
+        <p class="muted trust-extra" id="public-extra-stat">Средняя сделка: 0 ₽</p>
         <div class="trust-grid">
           <article class="kpi">
             <p>🤝 Уже доверились</p>
@@ -113,17 +114,17 @@
             <article class="kpi"><p>X123 (прибыль/оборот)</p><strong id="x123-kpi">0%</strong></article>
           </div>
 
-          <div class="filters">
+          <div class="filters action-bar">
             <label>
               Сортировка
-              <select id="loan-sort">
+              <select id="loan-sort" class="action-btn">
                 <option value="lentAt_desc">Сначала новые по дате займа</option>
                 <option value="profit_desc">По прибыли (убыв.)</option>
                 <option value="amount_desc">По сумме займа (убыв.)</option>
                 <option value="dueAt_asc">Ближайший срок возврата</option>
               </select>
             </label>
-            <button class="btn secondary" id="export-csv" type="button">Экспорт CSV</button>
+            <button class="btn secondary action-btn" id="export-csv" type="button">Экспорт CSV</button>
             <label class="checkbox-label">
               <input type="checkbox" id="only-unknown" />
               Показывать только ❓ Неизвестно
