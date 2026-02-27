@@ -10,11 +10,13 @@ const CONFIDENTIAL_ALLOWED_USERS = ["sick_x_people", "admin", "dev3xx"];
 
 const COMPANY_TURNOVER = 61612.55;
 
+const TELEGRAM_BOT_USERNAME = "@username122333bot";
+
 const PAYMENTS_CONFIG = {
   telegram_usdt: {
     label: "Telegram-бот + USDT",
-    recipient: "@Sick_X_People",
-    endpoint: "",
+    recipient: TELEGRAM_BOT_USERNAME,
+    endpoint: "/api/payments/telegram-usdt/create",
     network: "TRC20"
   },
   donationalerts: {
@@ -225,7 +227,9 @@ const handlePaymentSubmit = async (event) => {
   }
 
   if (paymentsMethod.value === "telegram_usdt") {
-    alert(`Отправьте клиенту: сумма ${payload.amount} USDT (${config.network}), получатель ${config.recipient}.`);
+    const botName = config.recipient.replace(/^@/, "");
+    const deepLink = `https://t.me/${botName}?start=pay_${encodeURIComponent(payload.amount)}`;
+    alert(`Отправьте клиенту: сумма ${payload.amount} USDT (${config.network}), бот ${config.recipient}.\nDeep link: ${deepLink}`);
   } else {
     alert(`Отправьте клиенту DonationAlerts ссылку: ${config.recipient} и подтвердите платеж вручную.`);
   }
