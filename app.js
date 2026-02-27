@@ -10,11 +10,19 @@ const CONFIDENTIAL_ALLOWED_USERS = ["sick_x_people", "admin", "dev3xx"];
 
 const COMPANY_TURNOVER = 61612.55;
 
-const YOOKASSA_CONFIG = {
-  provider: "yookassa",
-  returnUrl: `${window.location.origin}/payment-return`,
-  apiEndpoint: "",
-  currency: "RUB"
+const PAYMENTS_CONFIG = {
+  telegram_usdt: {
+    label: "Telegram-бот + USDT",
+    recipient: "@Sick_X_People",
+    endpoint: "",
+    network: "TRC20"
+  },
+  donationalerts: {
+    label: "DonationAlerts",
+    recipient: "https://www.donationalerts.com/r/your_name",
+    endpoint: "",
+    currency: "RUB"
+  }
 };
 
 const defaultBoard = {
@@ -95,12 +103,14 @@ const turnoverNode = document.getElementById("turnover-kpi");
 const x123Node = document.getElementById("x123-kpi");
 const confidentialContent = document.getElementById("confidential-content");
 const confidentialLock = document.getElementById("confidential-lock");
-const yookassaStatus = document.getElementById("yookassa-status");
-const yookassaReturnUrl = document.getElementById("yookassa-return-url");
-const yookassaEndpoint = document.getElementById("yookassa-endpoint");
-const yookassaForm = document.getElementById("yookassa-form");
-const yookassaPayBtn = document.getElementById("yookassa-pay-btn");
-const yookassaCopyBtn = document.getElementById("yookassa-copy-btn");
+const paymentsStatus = document.getElementById("payments-status");
+const paymentsActive = document.getElementById("payments-active");
+const paymentsEndpoint = document.getElementById("payments-endpoint");
+const paymentsRecipient = document.getElementById("payments-recipient");
+const paymentsForm = document.getElementById("payments-form");
+const paymentsMethod = document.getElementById("payments-method");
+const paymentsCreateBtn = document.getElementById("payments-create-btn");
+const paymentsCopyBtn = document.getElementById("payments-copy-btn");
 
 let isRegisterMode = false;
 
@@ -136,19 +146,18 @@ const applyTheme = (theme) => {
 
 
 
-const buildYookassaPayload = (amount, description) => {
+const getPaymentMethodConfig = () => PAYMENTS_CONFIG[paymentsMethod.value];
+
+const buildPaymentPayload = (amount, description) => {
   const session = getSession();
+  const method = paymentsMethod.value;
+  const config = getPaymentMethodConfig();
+
   return {
-    amount: {
-      value: Number(amount).toFixed(2),
-      currency: YOOKASSA_CONFIG.currency
-    },
-    capture: true,
-    confirmation: {
-      type: "redirect",
-      return_url: YOOKASSA_CONFIG.returnUrl
-    },
+    method,
+    amount: Number(amount).toFixed(2),
     description,
+    recipient: config.recipient,
     metadata: {
       user: session?.username || "guest",
       source: "bank-mvp"
@@ -156,61 +165,69 @@ const buildYookassaPayload = (amount, description) => {
   };
 };
 
-const renderYookassaPrep = () => {
-  yookassaReturnUrl.textContent = YOOKASSA_CONFIG.returnUrl;
-  yookassaEndpoint.textContent = YOOKASSA_CONFIG.apiEndpoint || "не задан";
+const renderPaymentsPrep = () => {
+  const config = getPaymentMethodConfig();
+  const ready = Boolean(config.endpoint) || config.recipient.startsWith("@");
 
-  const ready = Boolean(YOOKASSA_CONFIG.apiEndpoint);
-  yookassaPayBtn.disabled = !ready;
-  yookassaStatus.textContent = ready
-    ? "✅ Готово к backend-интеграции: endpoint задан."
-    : "⚠️ Нужен backend endpoint для create payment (например: /api/payments/yookassa/create).";
+  paymentsActive.textContent = config.label;
+  paymentsEndpoint.textContent = config.endpoint || "не задан (будет прямой перевод/ручная проверка)";
+  paymentsRecipient.textContent = config.recipient || "не задан";
+  paymentsCreateBtn.disabled = false;
+  paymentsStatus.textContent = ready
+    ? "✅ Сценарий подготовлен. Можно выдавать клиенту шаги оплаты."
+    : "⚠️ Заполните endpoint/recipient для выбранного сценария.";
 };
 
-const copyYookassaPayload = async () => {
-  const amount = Number(new FormData(yookassaForm).get("amount"));
-  const description = String(new FormData(yookassaForm).get("description") || "").trim();
-  const payload = buildYookassaPayload(amount, description);
+const copyPaymentPayload = async () => {
+  const amount = Number(new FormData(paymentsForm).get("amount"));
+  const description = String(new FormData(paymentsForm).get("description") || "").trim();
+  const payload = buildPaymentPayload(amount, description);
   const text = JSON.stringify(payload, null, 2);
 
   try {
     await navigator.clipboard.writeText(text);
-    alert("JSON payload скопирован в буфер обмена.");
+    alert("Payload скопирован. Отправьте его оператору/боту.");
   } catch {
-    alert("Не удалось скопировать автоматически. Откройте консоль: payload уже выведен.");
-    console.log("YooKassa payload:", text);
+    alert("Не удалось скопировать автоматически. Payload выведен в консоль.");
+    console.log("Payment payload:", text);
   }
 };
 
-const handleYookassaSubmit = async (event) => {
+const handlePaymentSubmit = async (event) => {
   event.preventDefault();
-  const formData = new FormData(yookassaForm);
+  const formData = new FormData(paymentsForm);
   const amount = Number(formData.get("amount"));
   const description = String(formData.get("description") || "").trim();
+  const payload = buildPaymentPayload(amount, description);
+  const config = getPaymentMethodConfig();
 
-  if (!YOOKASSA_CONFIG.apiEndpoint) {
-    alert("Backend endpoint для ЮKassa пока не задан. Сначала пришлите реквизиты/URL.");
+  if (config.endpoint) {
+    const response = await fetch(config.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      alert("Ошибка API. Проверьте endpoint.");
+      return;
+    }
+
+    const data = await response.json();
+    const redirectUrl = data?.redirect_url || data?.payment_url;
+    if (redirectUrl) {
+      window.location.href = redirectUrl;
+      return;
+    }
+
+    alert("Платеж создан, но ссылка не получена. Проверьте ответ API.");
     return;
   }
 
-  const payload = buildYookassaPayload(amount, description);
-  const response = await fetch(YOOKASSA_CONFIG.apiEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    alert("Не удалось создать платеж. Проверьте backend и ключи ЮKassa.");
-    return;
-  }
-
-  const data = await response.json();
-  const confirmUrl = data?.confirmation_url || data?.confirmation?.confirmation_url;
-  if (confirmUrl) {
-    window.location.href = confirmUrl;
+  if (paymentsMethod.value === "telegram_usdt") {
+    alert(`Отправьте клиенту: сумма ${payload.amount} USDT (${config.network}), получатель ${config.recipient}.`);
   } else {
-    alert("Платеж создан, но confirmation_url не пришел.");
+    alert(`Отправьте клиенту DonationAlerts ссылку: ${config.recipient} и подтвердите платеж вручную.`);
   }
 };
 
@@ -464,8 +481,9 @@ themeToggle.addEventListener("click", () => {
   saveJSON(STORAGE_KEYS.theme, next);
   applyTheme(next);
 });
-yookassaForm.addEventListener("submit", handleYookassaSubmit);
-yookassaCopyBtn.addEventListener("click", copyYookassaPayload);
+paymentsForm.addEventListener("submit", handlePaymentSubmit);
+paymentsCopyBtn.addEventListener("click", copyPaymentPayload);
+paymentsMethod.addEventListener("change", renderPaymentsPrep);
 
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -566,4 +584,4 @@ renderBoard();
 renderLoanBookStats();
 renderLoanBookTable();
 updateConfidentialUI();
-renderYookassaPrep();
+renderPaymentsPrep();

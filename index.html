@@ -159,30 +159,37 @@
       </section>
 
       <section class="card">
-        <h2>ЮKassa — подготовка интеграции</h2>
-        <p class="muted">Черновик интеграции: UI и контракт готовы, осталось подключить ваши реальные данные и backend API.</p>
-        <div class="yookassa-grid">
+        <h2>Платежи: Telegram-бот + USDT / DonationAlerts</h2>
+        <p class="muted">ЮKassa убрали. Ниже два рабочих вектора: крипта через бота и DonationAlerts с ручным подтверждением.</p>
+        <div class="payments-grid">
           <article>
             <h3>Статус</h3>
-            <p id="yookassa-status" class="muted">Проверка...</p>
+            <p id="payments-status" class="muted">Проверка...</p>
             <ul>
-              <li>Provider: <strong>ЮKassa</strong></li>
-              <li>Return URL: <code id="yookassa-return-url"></code></li>
-              <li>API endpoint: <code id="yookassa-endpoint"></code></li>
+              <li>Активный сценарий: <strong id="payments-active">—</strong></li>
+              <li>Endpoint/API: <code id="payments-endpoint"></code></li>
+              <li>Получатель: <code id="payments-recipient"></code></li>
             </ul>
           </article>
-          <form id="yookassa-form">
-            <h3>Тестовый платеж (черновик)</h3>
+          <form id="payments-form">
+            <h3>Черновик платежа</h3>
+            <label>
+              Вариант
+              <select name="method" id="payments-method">
+                <option value="telegram_usdt">Telegram-бот + USDT</option>
+                <option value="donationalerts">DonationAlerts + ручное подтверждение</option>
+              </select>
+            </label>
             <label>
               Сумма
               <input name="amount" type="number" min="1" step="0.01" value="100" required />
             </label>
             <label>
-              Описание
+              Комментарий
               <input name="description" value="Пополнение счёта" required />
             </label>
-            <button id="yookassa-pay-btn" class="btn" type="submit">Создать платеж</button>
-            <button id="yookassa-copy-btn" class="btn secondary" type="button">Скопировать payload</button>
+            <button id="payments-create-btn" class="btn" type="submit">Сформировать шаг оплаты</button>
+            <button id="payments-copy-btn" class="btn secondary" type="button">Скопировать payload</button>
           </form>
         </div>
       </section>

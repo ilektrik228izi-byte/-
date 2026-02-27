@@ -185,7 +185,7 @@ main {
   margin-bottom: 0.8rem;
 }
 
-.yookassa-grid {
+.payments-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 0.8rem;
