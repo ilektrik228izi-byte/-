@@ -2,7 +2,8 @@ const STORAGE_KEYS = {
   users: "bank_users",
   session: "bank_session",
   leaderboard: "bank_leaderboard",
-  theme: "bank_theme"
+  theme: "bank_theme",
+  coinGameBoard: "coin_game_board"
 };
 
 const CONFIDENTIAL_ACCESS_CODE = "BANK_PRIVATE_2026";
@@ -115,6 +116,11 @@ const paymentsForm = document.getElementById("payments-form");
 const paymentsMethod = document.getElementById("payments-method");
 const paymentsCreateBtn = document.getElementById("payments-create-btn");
 const paymentsCopyBtn = document.getElementById("payments-copy-btn");
+const coinGameStart = document.getElementById("coin-game-start");
+const coinGameTime = document.getElementById("coin-game-time");
+const coinGameScore = document.getElementById("coin-game-score");
+const coinGameArena = document.getElementById("coin-game-arena");
+const coinGameLeaderboard = document.getElementById("coin-game-leaderboard");
 
 let isRegisterMode = false;
 
@@ -241,6 +247,101 @@ const handlePaymentSubmit = async (event) => {
   }
 };
 
+let gameTimerId = null;
+let gameSpawnId = null;
+let gameSeconds = 20;
+let gameScore = 0;
+
+const getCoinGameBoard = () => readJSON(STORAGE_KEYS.coinGameBoard, []);
+
+const saveCoinGameScore = (username, score) => {
+  const board = getCoinGameBoard();
+  board.push({ username, score, at: Date.now() });
+  board.sort((a, b) => b.score - a.score || a.at - b.at);
+  saveJSON(STORAGE_KEYS.coinGameBoard, board.slice(0, 10));
+};
+
+const renderCoinGameLeaderboard = () => {
+  const board = getCoinGameBoard();
+  coinGameLeaderboard.innerHTML = "";
+  board.forEach((entry) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    const score = document.createElement("span");
+    name.textContent = entry.username;
+    score.textContent = `${entry.score} pts`;
+    li.append(name, score);
+    coinGameLeaderboard.append(li);
+  });
+};
+
+const cleanupCoins = () => {
+  coinGameArena.querySelectorAll(".coin").forEach((coin) => coin.remove());
+};
+
+const spawnCoin = () => {
+  const coin = document.createElement("button");
+  coin.type = "button";
+  coin.className = "coin";
+  coin.textContent = "🪙";
+
+  const width = coinGameArena.clientWidth - 44;
+  const height = coinGameArena.clientHeight - 44;
+  coin.style.left = `${Math.max(0, Math.floor(Math.random() * width))}px`;
+  coin.style.top = `${Math.max(0, Math.floor(Math.random() * height))}px`;
+
+  coin.addEventListener("click", () => {
+    gameScore += 10;
+    coinGameScore.textContent = String(gameScore);
+    coin.remove();
+  });
+
+  coinGameArena.append(coin);
+  setTimeout(() => coin.remove(), 1200);
+};
+
+const stopCoinGame = () => {
+  if (gameTimerId) {
+    clearInterval(gameTimerId);
+    gameTimerId = null;
+  }
+  if (gameSpawnId) {
+    clearInterval(gameSpawnId);
+    gameSpawnId = null;
+  }
+  cleanupCoins();
+  coinGameStart.disabled = false;
+
+  const session = getSession();
+  if (session?.username) {
+    saveCoinGameScore(session.username, gameScore);
+    renderCoinGameLeaderboard();
+  }
+};
+
+const startCoinGame = () => {
+  if (gameTimerId || !getSession()) {
+    return;
+  }
+
+  gameSeconds = 20;
+  gameScore = 0;
+  coinGameTime.textContent = String(gameSeconds);
+  coinGameScore.textContent = String(gameScore);
+  coinGameStart.disabled = true;
+  cleanupCoins();
+
+  spawnCoin();
+  gameSpawnId = setInterval(spawnCoin, 700);
+  gameTimerId = setInterval(() => {
+    gameSeconds -= 1;
+    coinGameTime.textContent = String(gameSeconds);
+    if (gameSeconds <= 0) {
+      stopCoinGame();
+    }
+  }, 1000);
+};
+
 const hasTablePermission = (session) => {
   if (!session) {
     return false;
@@ -358,8 +459,6 @@ const renderBorrowerInsights = () => {
     li.append(label, amount);
     borrowerInsights.append(li);
   });
-
-  renderBorrowerInsights();
 };
 
 const exportLoanTableToCsv = () => {
@@ -459,6 +558,7 @@ const updateSessionUI = () => {
     userChip.textContent = "";
     statsForm.classList.add("hidden");
     authToggle.textContent = "Войти / Зарегистрироваться";
+    coinGameStart.disabled = true;
     updateConfidentialUI();
     return;
   }
@@ -469,6 +569,7 @@ const updateSessionUI = () => {
   userChip.classList.remove("hidden");
   statsForm.classList.remove("hidden");
   authToggle.textContent = "Сменить аккаунт";
+  coinGameStart.disabled = false;
   updateConfidentialUI();
 };
 
@@ -494,6 +595,7 @@ themeToggle.addEventListener("click", () => {
 paymentsForm.addEventListener("submit", handlePaymentSubmit);
 paymentsCopyBtn.addEventListener("click", copyPaymentPayload);
 paymentsMethod.addEventListener("change", renderPaymentsPrep);
+coinGameStart.addEventListener("click", startCoinGame);
 
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -595,3 +697,4 @@ renderLoanBookStats();
 renderLoanBookTable();
 updateConfidentialUI();
 renderPaymentsPrep();
+renderCoinGameLeaderboard();
