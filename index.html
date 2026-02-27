@@ -13,6 +13,7 @@
         <p>Прозрачные вклады и займы без лишней бюрократии.</p>
       </div>
       <div class="header-actions">
+        <button id="theme-toggle" class="btn secondary" type="button">🌙 Тёмная тема</button>
         <button id="auth-toggle" class="btn">Войти / Зарегистрироваться</button>
         <div id="user-chip" class="user-chip hidden"></div>
       </div>
@@ -88,7 +89,7 @@
         </div>
 
         <div id="confidential-content" class="hidden">
-        <div class="loan-kpis">
+          <div class="loan-kpis">
           <article class="kpi"><p>Всего сделок</p><strong id="total-deals">0</strong></article>
           <article class="kpi"><p>✅ Вернули</p><strong id="returned-deals">0</strong></article>
           <article class="kpi"><p>❓ Неизвестно</p><strong id="unknown-deals">0</strong></article>
@@ -98,6 +99,16 @@
         </div>
 
         <div class="filters">
+            <label>
+              Сортировка
+              <select id="loan-sort">
+                <option value="lentAt_desc">Сначала новые по дате займа</option>
+                <option value="profit_desc">По прибыли (убыв.)</option>
+                <option value="amount_desc">По сумме займа (убыв.)</option>
+                <option value="dueAt_asc">Ближайший срок возврата</option>
+              </select>
+            </label>
+            <button class="btn secondary" id="export-csv" type="button">Экспорт CSV</button>
           <label class="checkbox-label">
             <input type="checkbox" id="only-unknown" />
             Показывать только ❓ Неизвестно
@@ -108,7 +119,12 @@
           </label>
         </div>
 
-        <div class="table-wrap">
+          <div class="insights">
+            <h3>Топ заёмщиков по заработку</h3>
+            <ol id="borrower-insights" class="stat-list"></ol>
+          </div>
+
+          <div class="table-wrap">
           <table>
             <thead>
               <tr>
@@ -125,8 +141,8 @@
             </thead>
             <tbody id="loan-book-body"></tbody>
           </table>
+          </div>
         </div>
-      </div>
       </section>
 
       <section class="card compact">

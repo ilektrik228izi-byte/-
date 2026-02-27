@@ -1,7 +1,8 @@
 const STORAGE_KEYS = {
   users: "bank_users",
   session: "bank_session",
-  leaderboard: "bank_leaderboard"
+  leaderboard: "bank_leaderboard",
+  theme: "bank_theme"
 };
 
 const CONFIDENTIAL_ACCESS_CODE = "BANK_PRIVATE_2026";
@@ -60,6 +61,7 @@ const loanRecords = [
   { borrower: "Егор Молостов", telegram: "@BDSMshhik_terentyy", amount: 700, percent: 20, mustReturn: 840, lentAt: "10.02.2026", dueAt: "15.02.2026", returned: true, earned: 140, note: "80 за задержку" }
 ];
 
+const themeToggle = document.getElementById("theme-toggle");
 const authToggle = document.getElementById("auth-toggle");
 const authDialog = document.getElementById("auth-dialog");
 const authForm = document.getElementById("auth-form");
@@ -75,6 +77,9 @@ const itemTemplate = document.getElementById("stat-item-template");
 const loanBookBody = document.getElementById("loan-book-body");
 const onlyUnknownCheckbox = document.getElementById("only-unknown");
 const loanSearchInput = document.getElementById("loan-search");
+const loanSort = document.getElementById("loan-sort");
+const exportCsvButton = document.getElementById("export-csv");
+const borrowerInsights = document.getElementById("borrower-insights");
 const totalDealsNode = document.getElementById("total-deals");
 const returnedDealsNode = document.getElementById("returned-deals");
 const unknownDealsNode = document.getElementById("unknown-deals");
@@ -101,6 +106,20 @@ const formatRub = (amount) =>
 const formatOptionalRub = (amount) => (typeof amount === "number" ? formatRub(amount) : "—");
 const formatPercent = (value) => (typeof value === "number" ? `${value}%` : "—");
 const safe = (value) => String(value ?? "");
+
+const parseDate = (value) => {
+  if (!value || !/^\d{2}\.\d{2}\.\d{4}$/.test(value)) {
+    return 0;
+  }
+  const [day, month, year] = value.split(".").map(Number);
+  return new Date(year, month - 1, day).getTime();
+};
+
+const applyTheme = (theme) => {
+  const dark = theme === "dark";
+  document.body.classList.toggle("dark", dark);
+  themeToggle.textContent = dark ? "☀️ Светлая тема" : "🌙 Тёмная тема";
+};
 
 const hasTablePermission = (session) => {
   if (!session) {
@@ -157,8 +176,9 @@ const renderBoard = () => {
 const getFilteredLoanRecords = () => {
   const search = loanSearchInput.value.trim().toLowerCase();
   const onlyUnknown = onlyUnknownCheckbox.checked;
+  const sortBy = loanSort.value;
 
-  return loanRecords.filter((row) => {
+  const filtered = loanRecords.filter((row) => {
     if (onlyUnknown && row.returned) {
       return false;
     }
@@ -169,6 +189,19 @@ const getFilteredLoanRecords = () => {
 
     return `${row.borrower} ${row.telegram} ${row.note}`.toLowerCase().includes(search);
   });
+
+  const sorted = [...filtered];
+  if (sortBy === "profit_desc") {
+    sorted.sort((a, b) => (b.earned || 0) - (a.earned || 0));
+  } else if (sortBy === "amount_desc") {
+    sorted.sort((a, b) => (b.amount || 0) - (a.amount || 0));
+  } else if (sortBy === "dueAt_asc") {
+    sorted.sort((a, b) => parseDate(a.dueAt) - parseDate(b.dueAt));
+  } else {
+    sorted.sort((a, b) => parseDate(b.lentAt) - parseDate(a.lentAt));
+  }
+
+  return sorted;
 };
 
 const renderLoanBookStats = () => {
@@ -184,6 +217,69 @@ const renderLoanBookStats = () => {
   totalProfitNode.textContent = formatRub(totalProfit);
   turnoverNode.textContent = formatRub(COMPANY_TURNOVER);
   x123Node.textContent = `${x123.toFixed(5)}%`;
+};
+
+const renderBorrowerInsights = () => {
+  const totals = new Map();
+  loanRecords.forEach((row) => {
+    const key = `${row.borrower} (${row.telegram})`;
+    const current = totals.get(key) || 0;
+    totals.set(key, current + (row.earned || 0));
+  });
+
+  const top = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  borrowerInsights.innerHTML = "";
+  top.forEach(([name, total]) => {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    const amount = document.createElement("span");
+    label.textContent = name;
+    amount.textContent = formatRub(total);
+    li.append(label, amount);
+    borrowerInsights.append(li);
+  });
+
+  renderBorrowerInsights();
+};
+
+const exportLoanTableToCsv = () => {
+  const rows = getFilteredLoanRecords();
+  const header = [
+    "Заниматель",
+    "Сумма займа",
+    "Процент займа",
+    "Сколько должен вернуть",
+    "Занял",
+    "Должен вернуть",
+    "Вернул",
+    "Сколько я заработал",
+    "Итого / заметки"
+  ];
+
+  const csvRows = [header.join(";")];
+  rows.forEach((row) => {
+    const data = [
+      `${row.borrower} (${row.telegram})`,
+      row.amount ?? "",
+      row.percent ?? "",
+      row.mustReturn ?? "",
+      row.lentAt ?? "",
+      row.dueAt ?? "",
+      row.returned ? "+" : "?",
+      row.earned ?? "",
+      row.note ?? ""
+    ].map((value) => `"${String(value).replace(/"/g, '""')}"`);
+
+    csvRows.push(data.join(";"));
+  });
+
+  const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "loan-ledger.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 const renderLoanBookTable = () => {
@@ -268,6 +364,13 @@ authToggle.addEventListener("click", () => authDialog.showModal());
 closeAuth.addEventListener("click", () => authDialog.close());
 onlyUnknownCheckbox.addEventListener("change", renderLoanBookTable);
 loanSearchInput.addEventListener("input", renderLoanBookTable);
+loanSort.addEventListener("change", renderLoanBookTable);
+exportCsvButton.addEventListener("click", exportLoanTableToCsv);
+themeToggle.addEventListener("click", () => {
+  const next = document.body.classList.contains("dark") ? "light" : "dark";
+  saveJSON(STORAGE_KEYS.theme, next);
+  applyTheme(next);
+});
 
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -358,6 +461,9 @@ statsForm.addEventListener("submit", (event) => {
   renderBoard();
   statsForm.reset();
 });
+
+const storedTheme = readJSON(STORAGE_KEYS.theme, "light");
+applyTheme(storedTheme);
 
 setAuthMode(false);
 updateSessionUI();

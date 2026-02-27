@@ -9,6 +9,16 @@
   --border: #d6deea;
 }
 
+body.dark {
+  --bg: #101826;
+  --card: #172335;
+  --text: #e9eef8;
+  --muted: #b4c0d3;
+  --brand: #3d7dff;
+  --brand-dark: #8fb4ff;
+  --border: #314660;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -33,6 +43,13 @@ main {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .card {
@@ -164,6 +181,10 @@ main {
   margin-bottom: 0.8rem;
 }
 
+.insights {
+  margin-bottom: 0.8rem;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -193,11 +214,14 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+select {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.5rem 0.65rem;
   font: inherit;
+  background: var(--card);
+  color: var(--text);
 }
 
 .checkbox-label {
