@@ -65,6 +65,16 @@ main {
   padding: 0.8rem 1.2rem;
 }
 
+.trust-strip {
+  border-left: 4px solid var(--brand);
+}
+
+.trust-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem;
+}
+
 .rates-grid,
 .leaderboards {
   display: grid;

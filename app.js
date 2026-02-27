@@ -100,6 +100,8 @@ const loanSearchInput = document.getElementById("loan-search");
 const loanSort = document.getElementById("loan-sort");
 const exportCsvButton = document.getElementById("export-csv");
 const borrowerInsights = document.getElementById("borrower-insights");
+const publicTotalDealsNode = document.getElementById("public-total-deals");
+const publicTurnoverNode = document.getElementById("public-turnover");
 const totalDealsNode = document.getElementById("total-deals");
 const returnedDealsNode = document.getElementById("returned-deals");
 const unknownDealsNode = document.getElementById("unknown-deals");
@@ -425,6 +427,11 @@ const getFilteredLoanRecords = () => {
   return sorted;
 };
 
+const renderPublicTrustStats = () => {
+  publicTotalDealsNode.textContent = String(loanRecords.length);
+  publicTurnoverNode.textContent = formatRub(COMPANY_TURNOVER);
+};
+
 const renderLoanBookStats = () => {
   const totalDeals = loanRecords.length;
   const returnedDeals = loanRecords.filter((row) => row.returned).length;
@@ -693,6 +700,7 @@ applyTheme(storedTheme);
 setAuthMode(false);
 updateSessionUI();
 renderBoard();
+renderPublicTrustStats();
 renderLoanBookStats();
 renderLoanBookTable();
 updateConfidentialUI();
