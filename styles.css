@@ -185,6 +185,23 @@ main {
   margin-bottom: 0.8rem;
 }
 
+.yookassa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.8rem;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+code {
+  background: rgba(120, 140, 170, 0.15);
+  padding: 0.12rem 0.3rem;
+  border-radius: 6px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }

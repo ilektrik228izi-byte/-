@@ -10,6 +10,13 @@ const CONFIDENTIAL_ALLOWED_USERS = ["sick_x_people", "admin", "dev3xx"];
 
 const COMPANY_TURNOVER = 61612.55;
 
+const YOOKASSA_CONFIG = {
+  provider: "yookassa",
+  returnUrl: `${window.location.origin}/payment-return`,
+  apiEndpoint: "",
+  currency: "RUB"
+};
+
 const defaultBoard = {
   deposits: [
     { username: "Участник #1", amount: 245000, isPublic: false },
@@ -88,6 +95,12 @@ const turnoverNode = document.getElementById("turnover-kpi");
 const x123Node = document.getElementById("x123-kpi");
 const confidentialContent = document.getElementById("confidential-content");
 const confidentialLock = document.getElementById("confidential-lock");
+const yookassaStatus = document.getElementById("yookassa-status");
+const yookassaReturnUrl = document.getElementById("yookassa-return-url");
+const yookassaEndpoint = document.getElementById("yookassa-endpoint");
+const yookassaForm = document.getElementById("yookassa-form");
+const yookassaPayBtn = document.getElementById("yookassa-pay-btn");
+const yookassaCopyBtn = document.getElementById("yookassa-copy-btn");
 
 let isRegisterMode = false;
 
@@ -119,6 +132,86 @@ const applyTheme = (theme) => {
   const dark = theme === "dark";
   document.body.classList.toggle("dark", dark);
   themeToggle.textContent = dark ? "☀️ Светлая тема" : "🌙 Тёмная тема";
+};
+
+
+
+const buildYookassaPayload = (amount, description) => {
+  const session = getSession();
+  return {
+    amount: {
+      value: Number(amount).toFixed(2),
+      currency: YOOKASSA_CONFIG.currency
+    },
+    capture: true,
+    confirmation: {
+      type: "redirect",
+      return_url: YOOKASSA_CONFIG.returnUrl
+    },
+    description,
+    metadata: {
+      user: session?.username || "guest",
+      source: "bank-mvp"
+    }
+  };
+};
+
+const renderYookassaPrep = () => {
+  yookassaReturnUrl.textContent = YOOKASSA_CONFIG.returnUrl;
+  yookassaEndpoint.textContent = YOOKASSA_CONFIG.apiEndpoint || "не задан";
+
+  const ready = Boolean(YOOKASSA_CONFIG.apiEndpoint);
+  yookassaPayBtn.disabled = !ready;
+  yookassaStatus.textContent = ready
+    ? "✅ Готово к backend-интеграции: endpoint задан."
+    : "⚠️ Нужен backend endpoint для create payment (например: /api/payments/yookassa/create).";
+};
+
+const copyYookassaPayload = async () => {
+  const amount = Number(new FormData(yookassaForm).get("amount"));
+  const description = String(new FormData(yookassaForm).get("description") || "").trim();
+  const payload = buildYookassaPayload(amount, description);
+  const text = JSON.stringify(payload, null, 2);
+
+  try {
+    await navigator.clipboard.writeText(text);
+    alert("JSON payload скопирован в буфер обмена.");
+  } catch {
+    alert("Не удалось скопировать автоматически. Откройте консоль: payload уже выведен.");
+    console.log("YooKassa payload:", text);
+  }
+};
+
+const handleYookassaSubmit = async (event) => {
+  event.preventDefault();
+  const formData = new FormData(yookassaForm);
+  const amount = Number(formData.get("amount"));
+  const description = String(formData.get("description") || "").trim();
+
+  if (!YOOKASSA_CONFIG.apiEndpoint) {
+    alert("Backend endpoint для ЮKassa пока не задан. Сначала пришлите реквизиты/URL.");
+    return;
+  }
+
+  const payload = buildYookassaPayload(amount, description);
+  const response = await fetch(YOOKASSA_CONFIG.apiEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    alert("Не удалось создать платеж. Проверьте backend и ключи ЮKassa.");
+    return;
+  }
+
+  const data = await response.json();
+  const confirmUrl = data?.confirmation_url || data?.confirmation?.confirmation_url;
+  if (confirmUrl) {
+    window.location.href = confirmUrl;
+  } else {
+    alert("Платеж создан, но confirmation_url не пришел.");
+  }
 };
 
 const hasTablePermission = (session) => {
@@ -371,6 +464,8 @@ themeToggle.addEventListener("click", () => {
   saveJSON(STORAGE_KEYS.theme, next);
   applyTheme(next);
 });
+yookassaForm.addEventListener("submit", handleYookassaSubmit);
+yookassaCopyBtn.addEventListener("click", copyYookassaPayload);
 
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -471,3 +566,4 @@ renderBoard();
 renderLoanBookStats();
 renderLoanBookTable();
 updateConfidentialUI();
+renderYookassaPrep();

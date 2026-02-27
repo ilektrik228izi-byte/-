@@ -90,15 +90,15 @@
 
         <div id="confidential-content" class="hidden">
           <div class="loan-kpis">
-          <article class="kpi"><p>Всего сделок</p><strong id="total-deals">0</strong></article>
-          <article class="kpi"><p>✅ Вернули</p><strong id="returned-deals">0</strong></article>
-          <article class="kpi"><p>❓ Неизвестно</p><strong id="unknown-deals">0</strong></article>
-          <article class="kpi"><p>Чистая прибыль</p><strong id="total-profit">0 ₽</strong></article>
-          <article class="kpi"><p>Оборот</p><strong id="turnover-kpi">0 ₽</strong></article>
-          <article class="kpi"><p>X123 (прибыль/оборот)</p><strong id="x123-kpi">0%</strong></article>
-        </div>
+            <article class="kpi"><p>Всего сделок</p><strong id="total-deals">0</strong></article>
+            <article class="kpi"><p>✅ Вернули</p><strong id="returned-deals">0</strong></article>
+            <article class="kpi"><p>❓ Неизвестно</p><strong id="unknown-deals">0</strong></article>
+            <article class="kpi"><p>Чистая прибыль</p><strong id="total-profit">0 ₽</strong></article>
+            <article class="kpi"><p>Оборот</p><strong id="turnover-kpi">0 ₽</strong></article>
+            <article class="kpi"><p>X123 (прибыль/оборот)</p><strong id="x123-kpi">0%</strong></article>
+          </div>
 
-        <div class="filters">
+          <div class="filters">
             <label>
               Сортировка
               <select id="loan-sort">
@@ -109,15 +109,15 @@
               </select>
             </label>
             <button class="btn secondary" id="export-csv" type="button">Экспорт CSV</button>
-          <label class="checkbox-label">
-            <input type="checkbox" id="only-unknown" />
-            Показывать только ❓ Неизвестно
-          </label>
-          <label>
-            Поиск
-            <input id="loan-search" placeholder="Имя, @username или заметка" />
-          </label>
-        </div>
+            <label class="checkbox-label">
+              <input type="checkbox" id="only-unknown" />
+              Показывать только ❓ Неизвестно
+            </label>
+            <label>
+              Поиск
+              <input id="loan-search" placeholder="Имя, @username или заметка" />
+            </label>
+          </div>
 
           <div class="insights">
             <h3>Топ заёмщиков по заработку</h3>
@@ -125,22 +125,22 @@
           </div>
 
           <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Заниматель</th>
-                <th>Сумма займа</th>
-                <th>Процент займа</th>
-                <th>Сколько должен вернуть</th>
-                <th>Занял</th>
-                <th>Должен вернуть</th>
-                <th>Вернул</th>
-                <th>Сколько я заработал</th>
-                <th>Итого / заметки</th>
-              </tr>
-            </thead>
-            <tbody id="loan-book-body"></tbody>
-          </table>
+            <table>
+              <thead>
+                <tr>
+                  <th>Заниматель</th>
+                  <th>Сумма займа</th>
+                  <th>Процент займа</th>
+                  <th>Сколько должен вернуть</th>
+                  <th>Занял</th>
+                  <th>Должен вернуть</th>
+                  <th>Вернул</th>
+                  <th>Сколько я заработал</th>
+                  <th>Итого / заметки</th>
+                </tr>
+              </thead>
+              <tbody id="loan-book-body"></tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -156,6 +156,35 @@
           Telegram:
           <a href="https://t.me/Sick_X_People" target="_blank" rel="noreferrer noopener">@Sick_X_People</a>
         </p>
+      </section>
+
+      <section class="card">
+        <h2>ЮKassa — подготовка интеграции</h2>
+        <p class="muted">Черновик интеграции: UI и контракт готовы, осталось подключить ваши реальные данные и backend API.</p>
+        <div class="yookassa-grid">
+          <article>
+            <h3>Статус</h3>
+            <p id="yookassa-status" class="muted">Проверка...</p>
+            <ul>
+              <li>Provider: <strong>ЮKassa</strong></li>
+              <li>Return URL: <code id="yookassa-return-url"></code></li>
+              <li>API endpoint: <code id="yookassa-endpoint"></code></li>
+            </ul>
+          </article>
+          <form id="yookassa-form">
+            <h3>Тестовый платеж (черновик)</h3>
+            <label>
+              Сумма
+              <input name="amount" type="number" min="1" step="0.01" value="100" required />
+            </label>
+            <label>
+              Описание
+              <input name="description" value="Пополнение счёта" required />
+            </label>
+            <button id="yookassa-pay-btn" class="btn" type="submit">Создать платеж</button>
+            <button id="yookassa-copy-btn" class="btn secondary" type="button">Скопировать payload</button>
+          </form>
+        </div>
       </section>
     </main>
 
