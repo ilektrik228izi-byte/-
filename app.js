@@ -3,7 +3,8 @@ const STORAGE_KEYS = {
   session: "bank_session",
   leaderboard: "bank_leaderboard",
   theme: "bank_theme",
-  coinGameBoard: "coin_game_board"
+  coinGameBoard: "coin_game_board",
+  behaviorStats: "behavior_stats"
 };
 
 const CONFIDENTIAL_ACCESS_CODE = "BANK_PRIVATE_2026";
@@ -100,6 +101,7 @@ const loanSearchInput = document.getElementById("loan-search");
 const loanSort = document.getElementById("loan-sort");
 const exportCsvButton = document.getElementById("export-csv");
 const borrowerInsights = document.getElementById("borrower-insights");
+const behaviorStats = document.getElementById("behavior-stats");
 const publicTotalDealsNode = document.getElementById("public-total-deals");
 const publicTurnoverNode = document.getElementById("public-turnover");
 const totalDealsNode = document.getElementById("total-deals");
@@ -125,6 +127,42 @@ const coinGameArena = document.getElementById("coin-game-arena");
 const coinGameLeaderboard = document.getElementById("coin-game-leaderboard");
 
 let isRegisterMode = false;
+
+const leaderboardPhrases = [
+  "Мечтает согреться вашими деньгами...",
+  "Пьедестал ждёт героя. Это можете быть вы!",
+  "Хочет, чтобы его заняли именно вы!",
+  "Третье место грустит без вас...",
+  "Заждались ваших тёплых?"
+];
+
+const trackBehavior = (eventName) => {
+  const stats = readJSON(STORAGE_KEYS.behaviorStats, {});
+  stats[eventName] = (stats[eventName] || 0) + 1;
+  saveJSON(STORAGE_KEYS.behaviorStats, stats);
+};
+
+const renderBehaviorStats = () => {
+  const stats = readJSON(STORAGE_KEYS.behaviorStats, {});
+  const entries = Object.entries(stats).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  behaviorStats.innerHTML = "";
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.textContent = "Пока нет данных, соберите первые действия пользователей.";
+    behaviorStats.append(li);
+    return;
+  }
+
+  entries.forEach(([name, count]) => {
+    const li = document.createElement("li");
+    const title = document.createElement("span");
+    const value = document.createElement("span");
+    title.textContent = name;
+    value.textContent = `${count}`;
+    li.append(title, value);
+    behaviorStats.append(li);
+  });
+};
 
 const readJSON = (key, fallback) => {
   const value = localStorage.getItem(key);
@@ -318,6 +356,7 @@ const stopCoinGame = () => {
   if (session?.username) {
     saveCoinGameScore(session.username, gameScore);
     renderCoinGameLeaderboard();
+renderBehaviorStats();
   }
 };
 
@@ -386,8 +425,16 @@ const renderBoard = () => {
       const nameNode = clone.querySelector(".name");
       const amountNode = clone.querySelector(".amount");
       const label = entry.isPublic ? entry.username : `Участник #${index + 1}`;
+      const phrase = leaderboardPhrases[index % leaderboardPhrases.length];
       nameNode.textContent = label;
-      amountNode.textContent = "Этому месту одиноко без вас...";
+      amountNode.textContent = phrase;
+      amountNode.title = "Нажми, если откликается";
+      amountNode.style.cursor = "pointer";
+      amountNode.addEventListener("click", () => {
+        trackBehavior(`phrase_click:${phrase}`);
+        renderBehaviorStats();
+      });
+      trackBehavior(`phrase_show:${phrase}`);
       node.append(clone);
     });
   };
@@ -428,8 +475,9 @@ const getFilteredLoanRecords = () => {
 };
 
 const renderPublicTrustStats = () => {
-  publicTotalDealsNode.textContent = String(loanRecords.length);
-  publicTurnoverNode.textContent = formatRub(COMPANY_TURNOVER);
+  publicTotalDealsNode.textContent = `${loanRecords.length} человек`;
+  const roundedTurnover = Math.round(COMPANY_TURNOVER);
+  publicTurnoverNode.textContent = `${new Intl.NumberFormat("ru-RU").format(roundedTurnover)} ₽`;
 };
 
 const renderLoanBookStats = () => {
@@ -588,12 +636,28 @@ const setAuthMode = (registerMode) => {
 };
 
 switchMode.addEventListener("click", () => setAuthMode(!isRegisterMode));
-authToggle.addEventListener("click", () => authDialog.showModal());
+authToggle.addEventListener("click", () => {
+  trackBehavior("open_auth_dialog");
+  renderBehaviorStats();
+  authDialog.showModal();
+});
 closeAuth.addEventListener("click", () => authDialog.close());
 onlyUnknownCheckbox.addEventListener("change", renderLoanBookTable);
-loanSearchInput.addEventListener("input", renderLoanBookTable);
-loanSort.addEventListener("change", renderLoanBookTable);
-exportCsvButton.addEventListener("click", exportLoanTableToCsv);
+loanSearchInput.addEventListener("input", () => {
+  trackBehavior("loan_search_input");
+  renderLoanBookTable();
+  renderBehaviorStats();
+});
+loanSort.addEventListener("change", () => {
+  trackBehavior("loan_sort_change");
+  renderLoanBookTable();
+  renderBehaviorStats();
+});
+exportCsvButton.addEventListener("click", () => {
+  trackBehavior("export_csv");
+  renderBehaviorStats();
+  exportLoanTableToCsv();
+});
 themeToggle.addEventListener("click", () => {
   const next = document.body.classList.contains("dark") ? "light" : "dark";
   saveJSON(STORAGE_KEYS.theme, next);
@@ -602,7 +666,11 @@ themeToggle.addEventListener("click", () => {
 paymentsForm.addEventListener("submit", handlePaymentSubmit);
 paymentsCopyBtn.addEventListener("click", copyPaymentPayload);
 paymentsMethod.addEventListener("change", renderPaymentsPrep);
-coinGameStart.addEventListener("click", startCoinGame);
+coinGameStart.addEventListener("click", () => {
+  trackBehavior("coin_game_start");
+  renderBehaviorStats();
+  startCoinGame();
+});
 
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -630,6 +698,8 @@ authForm.addEventListener("submit", (event) => {
     users.push({ username, password, telegram, confidentialAccess });
     saveJSON(STORAGE_KEYS.users, users);
     saveJSON(STORAGE_KEYS.session, { username, telegram, confidentialAccess });
+    trackBehavior("register_success");
+    renderBehaviorStats();
     if (!confidentialAccess) {
       alert("Аккаунт создан. Доступ к конфиденциальной таблице не выдан.");
     } else {
@@ -652,6 +722,8 @@ authForm.addEventListener("submit", (event) => {
     }
 
     saveJSON(STORAGE_KEYS.users, users);
+    trackBehavior("login_success");
+    renderBehaviorStats();
     saveJSON(STORAGE_KEYS.session, {
       username: matched.username,
       telegram: matched.telegram,
@@ -689,6 +761,8 @@ statsForm.addEventListener("submit", (event) => {
   board.deposits.push({ username: session.username, amount: deposit, isPublic: shareName });
   board.loans.push({ username: session.username, amount: loan, isPublic: shareName });
 
+  trackBehavior("leaderboard_submit");
+  renderBehaviorStats();
   saveJSON(STORAGE_KEYS.leaderboard, board);
   renderBoard();
   statsForm.reset();
@@ -706,3 +780,4 @@ renderLoanBookTable();
 updateConfidentialUI();
 renderPaymentsPrep();
 renderCoinGameLeaderboard();
+renderBehaviorStats();
