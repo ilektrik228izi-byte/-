@@ -9,6 +9,8 @@
     "test": "node --test tests/integration.test.mjs",
     "reconcile": "node scripts/reconcile_job.mjs",
     "backup": "node scripts/backup_data.mjs",
-    "deploy:worker": "bash scripts/deploy_worker.sh"
+    "deploy:worker": "bash scripts/deploy_worker.sh deploy",
+    "deploy:worker:version": "bash scripts/deploy_worker.sh upload-version",
+    "deploy:worker:release": "bash scripts/deploy_worker.sh deploy-version"
   }
 }

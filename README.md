@@ -145,7 +145,7 @@ npm test
 В этом репозитории это исправлено через:
 - `wrangler.toml` (явная конфигурация проекта)
 - `worker.js` (entrypoint Worker)
-- `assets` binding для раздачи `index.html`, `app.js`, `styles.css` и других статических файлов
+- `assets` binding, направленный в папку `public/` (только фронтенд-статика без `.git`, `README` и служебных файлов)
 
 ### Что и где будет доступно
 - Основной домен Worker: `https://bank1.ilektrik-228-izi.workers.dev`
@@ -161,13 +161,25 @@ npm test
 # рекомендуемый вариант (фиксирует корень репозитория и config)
 npm run deploy:worker
 
+# загрузить версию (для Workers Builds Version command)
+npm run deploy:worker:version
+
+# вывести загруженную версию в прод-трафик
+npm run deploy:worker:release
+
 # эквивалент
-bash scripts/deploy_worker.sh
+bash scripts/deploy_worker.sh deploy
 ```
 
 Если вы деплоите через Cloudflare Workers Builds, укажите в настройках проекта:
-- **Build command / Deploy command**: `npm run deploy:worker`
-- **Root directory**: корень репозитория (где лежит `wrangler.toml`)
+- **Build command**: оставить пустым
+- **Deploy command**: `npm run deploy:worker` (или `npm run deploy:worker:version`, если используете Versions API)
+- **Version command**: `npm run deploy:worker:version`
+- **Root directory**: `.` (корень репозитория), **не** `wrangler.toml`
+
+
+- В корне репозитория лежит backend/инфра код, поэтому для Worker-статики используется только `public/`.
+  Это предотвращает случайную загрузку служебных файлов в Assets.
 
 ### Важно
 Cloudflare Worker в текущей конфигурации используется как static/frontend hosting.
