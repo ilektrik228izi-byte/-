@@ -66,3 +66,10 @@ node server.js
 - Username: только `A-Za-z0-9_`, длина 3..32.
 - Password: минимум 8 символов.
 - Для HTTPS в проде включите `COOKIE_SECURE=true`.
+
+## Тестирование
+
+- Быстрая проверка синтаксиса:
+  - `npm run check`
+- Интеграционные smoke-тесты API (auth/CSRF/RBAC/payments):
+  - `npm test`

@@ -5,6 +5,7 @@
   "description": "Static MVP with built-in Node backend for crypto payments and telemetry",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check app.js && node --check server.js"
+    "check": "node --check app.js && node --check server.js",
+    "test": "node --test tests/integration.test.mjs"
   }
 }
