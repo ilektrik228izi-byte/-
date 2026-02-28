@@ -7,21 +7,24 @@ const STORAGE_KEYS = {
   behaviorStats: "behavior_stats"
 };
 
-const CONFIDENTIAL_ACCESS_CODE = "BANK_PRIVATE_2026";
-const CONFIDENTIAL_ALLOWED_USERS = ["sick_x_people", "admin", "dev3xx"];
-
 const COMPANY_TURNOVER = 61612.55;
-
-const TELEGRAM_BOT_USERNAME = "@username122333bot";
-const TON_WALLET_ADDRESS = "UQBu-4JdgbIdHIYqj2tUazFi9iQ3BIpypK-akdmbnT1KbO9Q";
 
 const PAYMENTS_CONFIG = {
   telegram_usdt: {
     label: "Telegram-бот + крипта",
-    recipient: TELEGRAM_BOT_USERNAME,
+    recipient: "@bot",
     endpoint: "/api/payments/telegram-crypto/create",
     network: "TON / USDT (TON)",
-    wallet: TON_WALLET_ADDRESS
+    wallet: ""
+  }
+};
+
+let runtimeConfig = {
+  payments: {
+    telegram_usdt: {
+      recipient: "@username122333bot",
+      wallet: ""
+    }
   }
 };
 
@@ -222,6 +225,37 @@ const applyTheme = (theme) => {
 
 const TELEMETRY_ENDPOINT = "/api/telemetry/collect";
 
+let currentSession = null;
+
+const getSession = () => currentSession;
+
+const apiFetch = async (url, options = {}) => {
+  const response = await fetch(url, {
+    credentials: "include",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || `HTTP ${response.status}`);
+  }
+
+  return data;
+};
+
+const loadRuntimeConfig = async () => {
+  try {
+    const data = await apiFetch("/api/public/runtime", { method: "GET" });
+    runtimeConfig = data;
+  } catch {
+    // fallback to demo defaults when backend is unavailable
+  }
+};
+
 const collectClientContext = () => ({
   path: location.pathname,
   url: location.href,
@@ -262,7 +296,12 @@ const sendTelemetry = (eventName, extra = null) => {
   }).catch(() => {});
 };
 
-const getPaymentMethodConfig = () => PAYMENTS_CONFIG[paymentsMethod.value] || PAYMENTS_CONFIG.telegram_usdt;
+const getPaymentMethodConfig = () => {
+  const method = paymentsMethod.value || "telegram_usdt";
+  const base = PAYMENTS_CONFIG[method] || PAYMENTS_CONFIG.telegram_usdt;
+  const runtime = runtimeConfig?.payments?.[method] || {};
+  return { ...base, ...runtime };
+};
 
 const buildPaymentPayload = (amount, description) => {
   const session = getSession();
@@ -322,41 +361,46 @@ const handlePaymentSubmit = async (event) => {
 
   sendTelemetry("payment_submit", { method: paymentsMethod.value, amount: payload.amount });
 
-  if (config.endpoint) {
-    const response = await fetch(config.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+  try {
+    if (config.endpoint) {
+      const response = await fetch(config.endpoint, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
 
-    if (!response.ok) {
-      alert("Ошибка API. Проверьте backend-слой и endpoint.");
-      sendTelemetry("payment_submit_failed", { reason: "api_not_ok", status: response.status });
+      if (!response.ok) {
+        alert("Ошибка API. Проверьте backend-слой и endpoint.");
+        sendTelemetry("payment_submit_failed", { reason: "api_not_ok", status: response.status });
+        return;
+      }
+
+      const data = await response.json();
+      const link = data?.paymentUrl || data?.deepLink || data?.payment_url || data?.redirect_url || "";
+
+      if (link) {
+        paymentsStatus.textContent = `✅ Платёж создан: ${link}`;
+        sendTelemetry("payment_submit_success", { paymentId: data.paymentId || null });
+        window.open(link, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      alert("Платеж создан, но ссылка не получена. Проверьте ответ API.");
+      paymentsStatus.textContent = "⚠️ Платеж создан без ссылки. Нужна ручная проверка ответа API.";
+      sendTelemetry("payment_submit_warning", { reason: "missing_link" });
       return;
     }
 
-    const data = await response.json();
-    const link = data?.paymentUrl || data?.deepLink || data?.payment_url || data?.redirect_url || "";
-
-    if (link) {
-      paymentsStatus.textContent = `✅ Платёж создан: ${link}`;
-      sendTelemetry("payment_submit_success", { paymentId: data.paymentId || null });
-      window.open(link, "_blank", "noopener,noreferrer");
-      return;
-    }
-
-    alert("Платеж создан, но ссылка не получена. Проверьте ответ API.");
-    paymentsStatus.textContent = "⚠️ Платеж создан без ссылки. Нужна ручная проверка ответа API.";
-    sendTelemetry("payment_submit_warning", { reason: "missing_link" });
-    return;
-  }
-
-  const botName = config.recipient.replace(/^@/, "");
-  const deepLink = `https://t.me/${botName}?start=pay_${encodeURIComponent(payload.amount)}`;
-  const walletPart = config.wallet ? `
+    const botName = config.recipient.replace(/^@/, "");
+    const deepLink = `https://t.me/${botName}?start=pay_${encodeURIComponent(payload.amount)}`;
+    const walletPart = config.wallet ? `
 TON address: ${config.wallet}` : "";
-  alert(`Отправьте клиенту: сумма ${payload.amount} (${config.network}), бот ${config.recipient}.
+    alert(`Отправьте клиенту: сумма ${payload.amount} (${config.network}), бот ${config.recipient}.
 Deep link: ${deepLink}${walletPart}`);
+  } catch (error) {
+    alert(error.message || "Не удалось создать платеж");
+  }
 };
 
 let gameTimerId = null;
@@ -464,9 +508,7 @@ const hasTablePermission = (session) => {
     return false;
   }
 
-  const normalized = session.username.trim().toLowerCase();
-  const userAllowed = CONFIDENTIAL_ALLOWED_USERS.includes(normalized);
-  return userAllowed && session.confidentialAccess === true;
+  return Array.isArray(session.permissions) && session.permissions.includes("confidential:view");
 };
 
 const updateConfidentialUI = () => {
@@ -476,9 +518,6 @@ const updateConfidentialUI = () => {
   confidentialContent.classList.toggle("hidden", !allowed);
   confidentialLock.classList.toggle("hidden", allowed);
 };
-
-const getUsers = () => readJSON(STORAGE_KEYS.users, []);
-const getSession = () => readJSON(STORAGE_KEYS.session, null);
 
 const getBoard = () => {
   const saved = readJSON(STORAGE_KEYS.leaderboard, null);
@@ -701,8 +740,9 @@ const updateSessionUI = () => {
   }
 
   const telegramPart = user.telegram ? ` • Telegram: ${toSafeTag(user.telegram)}` : "";
-  const securePart = user.confidentialAccess ? " • Доступ к таблице: да" : "";
-  userChip.textContent = `${user.username}${telegramPart}${securePart}`;
+  const rolePart = user.role ? ` • Роль: ${user.role}` : "";
+  const aclPart = hasTablePermission(user) ? " • Доступ к таблице: да" : "";
+  userChip.textContent = `${user.username}${telegramPart}${rolePart}${aclPart}`;
   userChip.classList.remove("hidden");
   statsForm.classList.remove("hidden");
   authToggle.textContent = "Сменить аккаунт";
@@ -718,7 +758,21 @@ const setAuthMode = (registerMode) => {
 };
 
 switchMode.addEventListener("click", () => setAuthMode(!isRegisterMode));
-authToggle.addEventListener("click", () => {
+authToggle.addEventListener("click", async () => {
+  const session = getSession();
+  if (session) {
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+      currentSession = null;
+      trackBehavior("logout_success");
+      updateSessionUI();
+      return;
+    } catch {
+      alert("Не удалось завершить сессию. Попробуйте снова.");
+      return;
+    }
+  }
+
   trackBehavior("open_auth_dialog");
   renderBehaviorStats();
   authDialog.showModal();
@@ -764,7 +818,7 @@ const grantWelcomeBonus = (username) => {
   renderBehaviorStats();
 };
 
-authForm.addEventListener("submit", (event) => {
+authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(authForm);
   const username = String(formData.get("username") || "").trim();
@@ -777,50 +831,28 @@ authForm.addEventListener("submit", (event) => {
     return;
   }
 
-  const users = getUsers();
-
-  if (isRegisterMode) {
-    const existing = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
-    if (existing) {
-      alert("Пользователь с таким логином уже существует.");
-      return;
-    }
-
-    const confidentialAccess = accessCode === CONFIDENTIAL_ACCESS_CODE;
-    users.push({ username, password, telegram, confidentialAccess });
-    saveJSON(STORAGE_KEYS.users, users);
-    saveJSON(STORAGE_KEYS.session, { username, telegram, confidentialAccess });
-    trackBehavior("register_success");
-    grantWelcomeBonus(username);
-    if (!confidentialAccess) {
-      alert(`🎁 ${username}, вам начислен приветственный бонус 100 ₽ во вклад! Аккаунт создан, доступ к конфиденциальной таблице не выдан.`);
+  try {
+    if (isRegisterMode) {
+      const registerData = await apiFetch("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ username, password, telegram, accessCode })
+      });
+      currentSession = registerData.session;
+      trackBehavior("register_success");
+      grantWelcomeBonus(username);
+      alert(`🎁 ${username}, вам начислен приветственный бонус 100 ₽ во вклад!`);
     } else {
-      alert(`🎁 ${username}, вам начислен приветственный бонус 100 ₽ во вклад! Доступ к конфиденциальной таблице открыт.`);
+      const loginData = await apiFetch("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password, accessCode })
+      });
+      currentSession = loginData.session;
+      trackBehavior("login_success");
+      renderBehaviorStats();
     }
-  } else {
-    const matched = users.find((u) => u.username === username && u.password === password);
-    if (!matched) {
-      alert("Неверный логин или пароль.");
-      return;
-    }
-
-    const updatedTelegram = telegram || matched.telegram;
-    if (updatedTelegram !== matched.telegram) {
-      matched.telegram = updatedTelegram;
-    }
-
-    if (accessCode === CONFIDENTIAL_ACCESS_CODE) {
-      matched.confidentialAccess = true;
-    }
-
-    saveJSON(STORAGE_KEYS.users, users);
-    trackBehavior("login_success");
-    renderBehaviorStats();
-    saveJSON(STORAGE_KEYS.session, {
-      username: matched.username,
-      telegram: matched.telegram,
-      confidentialAccess: Boolean(matched.confidentialAccess)
-    });
+  } catch (error) {
+    alert(error.message || "Ошибка авторизации");
+    return;
   }
 
   authDialog.close();
@@ -860,17 +892,30 @@ statsForm.addEventListener("submit", (event) => {
   statsForm.reset();
 });
 
-const storedTheme = readJSON(STORAGE_KEYS.theme, "light");
-applyTheme(storedTheme);
+const bootstrapApp = async () => {
+  const storedTheme = readJSON(STORAGE_KEYS.theme, "light");
+  applyTheme(storedTheme);
 
-setAuthMode(false);
-updateSessionUI();
-sendTelemetry("page_open");
-renderBoard();
-renderPublicTrustStats();
-renderLoanBookStats();
-renderLoanBookTable();
-updateConfidentialUI();
-renderPaymentsPrep();
-renderCoinGameLeaderboard();
-renderBehaviorStats();
+  setAuthMode(false);
+  await loadRuntimeConfig();
+
+  try {
+    const sessionData = await apiFetch("/api/auth/session", { method: "GET" });
+    currentSession = sessionData.session;
+  } catch {
+    currentSession = null;
+  }
+
+  updateSessionUI();
+  sendTelemetry("page_open");
+  renderBoard();
+  renderPublicTrustStats();
+  renderLoanBookStats();
+  renderLoanBookTable();
+  updateConfidentialUI();
+  renderPaymentsPrep();
+  renderCoinGameLeaderboard();
+  renderBehaviorStats();
+};
+
+bootstrapApp();

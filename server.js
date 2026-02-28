@@ -1,29 +1,115 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { randomUUID } = require('crypto');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = __dirname;
 const DATA_DIR = path.join(__dirname, 'data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const TELEMETRY_FILE = path.join(DATA_DIR, 'telemetry.log.ndjson');
 const PAYMENTS_FILE = path.join(DATA_DIR, 'payments.log.ndjson');
 
 const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || '@username122333bot';
-const TON_WALLET_ADDRESS = process.env.TON_WALLET_ADDRESS || 'UQBu-4JdgbIdHIYqj2tUazFi9iQ3BIpypK-akdmbnT1KbO9Q';
+const TON_WALLET_ADDRESS = process.env.TON_WALLET_ADDRESS || '';
 const TELEMETRY_ENABLED = String(process.env.TELEMETRY_ENABLED || 'true').toLowerCase() !== 'false';
+const ROLE_ELEVATION_CODE = process.env.ROLE_ELEVATION_CODE || '';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change_me_admin_password';
+
+const ROLE_PERMISSIONS = {
+  member: [],
+  analyst: ['confidential:view', 'telemetry:view'],
+  admin: ['confidential:view', 'telemetry:view', 'users:manage', 'payments:manage']
+};
+
+const sessions = new Map();
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const json = (res, statusCode, payload) => {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store'
+const writeJsonFile = (filePath, payload) => {
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2));
+};
+
+const readUsers = () => {
+  if (!fs.existsSync(USERS_FILE)) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveUsers = (users) => {
+  writeJsonFile(USERS_FILE, users);
+};
+
+const createPasswordHash = (password, salt = crypto.randomBytes(16).toString('hex')) => {
+  const hash = crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+};
+
+const verifyPassword = (password, encoded) => {
+  const [salt, expectedHash] = String(encoded || '').split(':');
+  if (!salt || !expectedHash) {
+    return false;
+  }
+  const calculated = crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex');
+  const expectedBuffer = Buffer.from(expectedHash, 'hex');
+  const calculatedBuffer = Buffer.from(calculated, 'hex');
+  if (expectedBuffer.length !== calculatedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(expectedBuffer, calculatedBuffer);
+};
+
+const toSessionPublicUser = (user) => ({
+  id: user.id,
+  username: user.username,
+  telegram: user.telegram || '',
+  role: user.role,
+  permissions: ROLE_PERMISSIONS[user.role] || []
+});
+
+const ensureAdminUser = () => {
+  const users = readUsers();
+  const exists = users.some((user) => user.username.toLowerCase() === ADMIN_USERNAME.toLowerCase());
+  if (exists) {
+    return;
+  }
+
+  users.push({
+    id: crypto.randomUUID(),
+    username: ADMIN_USERNAME,
+    telegram: '',
+    role: 'admin',
+    passwordHash: createPasswordHash(ADMIN_PASSWORD),
+    createdAt: new Date().toISOString()
   });
-  res.end(JSON.stringify(payload));
+
+  saveUsers(users);
+  console.log(`Bootstrap admin created: ${ADMIN_USERNAME}`);
+};
+
+ensureAdminUser();
+
+const parseCookies = (req) => {
+  const raw = req.headers.cookie || '';
+  return raw.split(';').reduce((acc, item) => {
+    const [key, ...rest] = item.trim().split('=');
+    if (!key) {
+      return acc;
+    }
+    acc[key] = decodeURIComponent(rest.join('='));
+    return acc;
+  }, {});
 };
 
 const getIp = (req) => {
@@ -32,6 +118,27 @@ const getIp = (req) => {
     return String(forwarded).split(',')[0].trim();
   }
   return req.socket.remoteAddress || 'unknown';
+};
+
+const collectServerContext = (req) => ({
+  collectedAt: new Date().toISOString(),
+  ip: getIp(req),
+  userAgent: req.headers['user-agent'] || null,
+  acceptLanguage: req.headers['accept-language'] || null,
+  referer: req.headers.referer || null,
+  origin: req.headers.origin || null,
+  host: req.headers.host || null,
+  method: req.method,
+  path: req.url
+});
+
+const json = (res, statusCode, payload, extraHeaders = {}) => {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    ...extraHeaders
+  });
+  res.end(JSON.stringify(payload));
 };
 
 const readBody = (req) =>
@@ -67,19 +174,142 @@ const appendNdjson = (filePath, payload) => {
   });
 };
 
-const sanitizeEvent = (value) => String(value || 'unknown').slice(0, 200);
+const getSessionUser = (req) => {
+  const sid = parseCookies(req).sid;
+  if (!sid) {
+    return null;
+  }
+  return sessions.get(sid) || null;
+};
 
-const collectServerContext = (req) => ({
-  collectedAt: new Date().toISOString(),
-  ip: getIp(req),
-  userAgent: req.headers['user-agent'] || null,
-  acceptLanguage: req.headers['accept-language'] || null,
-  referer: req.headers.referer || null,
-  origin: req.headers.origin || null,
-  host: req.headers.host || null,
-  method: req.method,
-  path: req.url
-});
+const requireAuth = (req, res) => {
+  const user = getSessionUser(req);
+  if (!user) {
+    json(res, 401, { ok: false, error: 'Unauthorized' });
+    return null;
+  }
+  return user;
+};
+
+const requirePermission = (req, res, permission) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return null;
+  }
+
+  const permissions = ROLE_PERMISSIONS[user.role] || [];
+  if (!permissions.includes(permission)) {
+    json(res, 403, { ok: false, error: 'Forbidden' });
+    return null;
+  }
+
+  return user;
+};
+
+const createSession = (res, user) => {
+  const sid = crypto.randomUUID();
+  sessions.set(sid, user);
+  const cookie = `sid=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`;
+  return { sid, cookie };
+};
+
+const handleRegister = async (req, res) => {
+  try {
+    const body = await readBody(req);
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '');
+    const telegram = String(body.telegram || '').trim().replace(/^@/, '');
+    const accessCode = String(body.accessCode || '').trim();
+
+    if (!username || username.length < 3) {
+      json(res, 400, { ok: false, error: 'Username too short' });
+      return;
+    }
+    if (!password || password.length < 6) {
+      json(res, 400, { ok: false, error: 'Password too short' });
+      return;
+    }
+
+    const users = readUsers();
+    const exists = users.some((user) => user.username.toLowerCase() === username.toLowerCase());
+    if (exists) {
+      json(res, 409, { ok: false, error: 'User already exists' });
+      return;
+    }
+
+    const role = accessCode && ROLE_ELEVATION_CODE && accessCode === ROLE_ELEVATION_CODE ? 'analyst' : 'member';
+    const user = {
+      id: crypto.randomUUID(),
+      username,
+      telegram,
+      role,
+      passwordHash: createPasswordHash(password),
+      createdAt: new Date().toISOString()
+    };
+
+    users.push(user);
+    saveUsers(users);
+
+    const sessionUser = toSessionPublicUser(user);
+    const { cookie } = createSession(res, sessionUser);
+    json(res, 201, { ok: true, session: sessionUser }, { 'Set-Cookie': cookie });
+  } catch (error) {
+    json(res, 400, { ok: false, error: error.message });
+  }
+};
+
+const handleLogin = async (req, res) => {
+  try {
+    const body = await readBody(req);
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '');
+    const accessCode = String(body.accessCode || '').trim();
+
+    const users = readUsers();
+    const user = users.find((item) => item.username.toLowerCase() === username.toLowerCase());
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      json(res, 401, { ok: false, error: 'Invalid credentials' });
+      return;
+    }
+
+    if (accessCode && ROLE_ELEVATION_CODE && accessCode === ROLE_ELEVATION_CODE && user.role === 'member') {
+      user.role = 'analyst';
+      saveUsers(users);
+    }
+
+    const sessionUser = toSessionPublicUser(user);
+    const { cookie } = createSession(res, sessionUser);
+    json(res, 200, { ok: true, session: sessionUser }, { 'Set-Cookie': cookie });
+  } catch (error) {
+    json(res, 400, { ok: false, error: error.message });
+  }
+};
+
+const handleSession = (req, res) => {
+  const user = getSessionUser(req);
+  json(res, 200, { ok: true, session: user });
+};
+
+const handleLogout = (req, res) => {
+  const sid = parseCookies(req).sid;
+  if (sid) {
+    sessions.delete(sid);
+  }
+
+  json(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' });
+};
+
+const handlePublicRuntime = (_req, res) => {
+  json(res, 200, {
+    ok: true,
+    payments: {
+      telegram_usdt: {
+        recipient: TELEGRAM_BOT_USERNAME,
+        wallet: TON_WALLET_ADDRESS
+      }
+    }
+  });
+};
 
 const handleTelemetryCollect = async (req, res) => {
   if (!TELEMETRY_ENABLED) {
@@ -89,10 +319,11 @@ const handleTelemetryCollect = async (req, res) => {
 
   try {
     const body = await readBody(req);
+    const sessionUser = getSessionUser(req);
     const record = {
-      id: randomUUID(),
-      event: sanitizeEvent(body.event),
-      user: body.user || null,
+      id: crypto.randomUUID(),
+      event: String(body.event || 'unknown').slice(0, 200),
+      user: sessionUser ? { id: sessionUser.id, username: sessionUser.username, role: sessionUser.role } : null,
       page: body.page || null,
       client: body.client || null,
       extra: body.extra || null,
@@ -106,7 +337,12 @@ const handleTelemetryCollect = async (req, res) => {
   }
 };
 
-const handleTelemetrySummary = (_req, res) => {
+const handleTelemetrySummary = (req, res) => {
+  const user = requirePermission(req, res, 'telemetry:view');
+  if (!user) {
+    return;
+  }
+
   if (!fs.existsSync(TELEMETRY_FILE)) {
     json(res, 200, { ok: true, totalEvents: 0, lastEvents: [] });
     return;
@@ -123,6 +359,7 @@ const handleTelemetrySummary = (_req, res) => {
 
   json(res, 200, {
     ok: true,
+    requestedBy: user.username,
     totalEvents: parsed.length,
     uniqueUsers: new Set(parsed.map((item) => item.user?.username).filter(Boolean)).size,
     lastEvents: parsed.slice(-10)
@@ -130,6 +367,11 @@ const handleTelemetrySummary = (_req, res) => {
 };
 
 const handleCreateCryptoPayment = async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
   try {
     const body = await readBody(req);
     const amount = Number(body.amount);
@@ -139,7 +381,7 @@ const handleCreateCryptoPayment = async (req, res) => {
       return;
     }
 
-    const paymentId = randomUUID();
+    const paymentId = crypto.randomUUID();
     const description = String(body.description || 'Пополнение счёта').slice(0, 200);
 
     const payment = {
@@ -151,6 +393,7 @@ const handleCreateCryptoPayment = async (req, res) => {
       wallet: TON_WALLET_ADDRESS,
       description,
       metadata: body.metadata || null,
+      createdBy: { id: user.id, username: user.username, role: user.role },
       server: collectServerContext(req)
     };
 
@@ -188,7 +431,8 @@ const CONTENT_TYPES = {
 };
 
 const serveStatic = (req, res) => {
-  const requestedPath = req.url === '/' ? '/index.html' : req.url;
+  const basePath = req.url.split('?')[0];
+  const requestedPath = basePath === '/' ? '/index.html' : basePath;
   const safePath = path.normalize(requestedPath).replace(/^\.\.(\/|\\|$)/, '');
   const filePath = path.join(PUBLIC_DIR, safePath);
 
@@ -212,6 +456,31 @@ const serveStatic = (req, res) => {
 };
 
 const server = http.createServer((req, res) => {
+  if (req.method === 'POST' && req.url === '/api/auth/register') {
+    handleRegister(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/auth/login') {
+    handleLogin(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/auth/session') {
+    handleSession(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/auth/logout') {
+    handleLogout(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/public/runtime') {
+    handlePublicRuntime(req, res);
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/payments/telegram-crypto/create') {
     handleCreateCryptoPayment(req, res);
     return;
