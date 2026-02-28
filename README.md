@@ -143,7 +143,8 @@ npm test
 значит Wrangler запускался без явной конфигурации проекта.
 
 В этом репозитории это исправлено через:
-- `wrangler.toml` (явная конфигурация проекта)
+- `wrangler.root.toml` (основная конфигурация для локального deploy-скрипта)
+- `wrangler.toml/wrangler.toml` (совместимость для Cloudflare Builds, если Root directory ошибочно задан как `wrangler.toml`)
 - `worker.js` (entrypoint Worker)
 - `assets` binding, направленный в папку `public/` (только фронтенд-статика без `.git`, `README` и служебных файлов)
 
@@ -175,7 +176,8 @@ bash scripts/deploy_worker.sh deploy
 - **Build command**: оставить пустым
 - **Deploy command**: `npm run deploy:worker` (или `npm run deploy:worker:version`, если используете Versions API)
 - **Version command**: `npm run deploy:worker:version`
-- **Root directory**: `.` (корень репозитория), **не** `wrangler.toml`
+- **Root directory**: `.` (корень репозитория) — рекомендуемый вариант
+- Если в UI уже стоит `wrangler.toml` как Root directory, тоже поддержано: в репозитории есть папка `wrangler.toml/` с рабочим конфигом
 
 
 - В корне репозитория лежит backend/инфра код, поэтому для Worker-статики используется только `public/`.
@@ -191,5 +193,13 @@ Backend API из `server.js` нужно деплоить отдельно в Nod
 Ошибка:
 `Could not detect a directory containing static files (e.g. html, css and js)`
 
-Обычно это значит, что `wrangler` стартовал **не из корня репозитория** или не увидел `wrangler.toml`.
+Обычно это значит, что `wrangler` стартовал **не из корня репозитория** или не увидел рабочий config (`wrangler.root.toml` или `wrangler.toml/wrangler.toml`).
 Скрипт `scripts/deploy_worker.sh` принудительно переходит в корень проекта и запускает deploy с `--config`.
+
+
+### Ошибка `Failed: root directory not found`
+Обычно это означает, что в Cloudflare указан неверный **Root directory**.
+
+Сейчас поддержаны два безопасных сценария:
+- `Root directory = .` (рекомендуется)
+- `Root directory = wrangler.toml` (fallback-совместимость добавлена в этот репозиторий)
