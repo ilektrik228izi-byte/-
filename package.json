@@ -1,0 +1,16 @@
+{
+  "name": "odkb-mvp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static MVP with built-in Node backend for crypto payments and telemetry",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check app.js && node --check server.js",
+    "test": "node --test tests/integration.test.mjs",
+    "reconcile": "node scripts/reconcile_job.mjs",
+    "backup": "node scripts/backup_data.mjs",
+    "deploy:worker": "bash scripts/deploy_worker.sh deploy",
+    "deploy:worker:version": "bash scripts/deploy_worker.sh upload-version",
+    "deploy:worker:release": "bash scripts/deploy_worker.sh deploy-version"
+  }
+}

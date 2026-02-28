@@ -1,0 +1,404 @@
+:root {
+  color-scheme: light;
+  --bg: #f3f6fb;
+  --card: #ffffff;
+  --text: #1f2a37;
+  --muted: #5f6b7a;
+  --brand: #1357d3;
+  --brand-dark: #0e43a0;
+  --border: #d6deea;
+}
+
+body.dark {
+  --bg: #101826;
+  --card: #172335;
+  --text: #e9eef8;
+  --muted: #b4c0d3;
+  --brand: #3d7dff;
+  --brand-dark: #8fb4ff;
+  --border: #314660;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+.site-header,
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem 1.2rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 10px rgba(10, 24, 54, 0.05);
+}
+
+.compact {
+  padding: 0.8rem 1.2rem;
+}
+
+.trust-strip {
+  border-left: 4px solid var(--brand);
+}
+
+.trust-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem;
+}
+
+.rates-grid,
+.leaderboards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.8rem;
+}
+
+.rate {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 0.3rem 0;
+  color: var(--brand-dark);
+}
+
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  background: var(--brand);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn.secondary {
+  background: #e8eefb;
+  color: var(--brand-dark);
+}
+
+.btn:hover {
+  filter: brightness(1.03);
+}
+
+.hidden {
+  display: none;
+}
+
+.user-chip {
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: #e8eefb;
+  color: var(--brand-dark);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--muted);
+  margin-top: 0;
+}
+
+.stat-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.stat-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  border-bottom: 1px dashed var(--border);
+  padding: 0.35rem 0;
+}
+
+.stats-form {
+  margin-top: 0.8rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.access-lock {
+  border: 1px dashed #e09a00;
+  background: #fff9e6;
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+
+.access-lock p {
+  margin: 0.25rem 0 0;
+  color: #6e4e00;
+}
+
+.loan-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.kpi {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  background: #f9fbff;
+}
+
+.kpi p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.kpi strong {
+  font-size: 1.15rem;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 320px);
+  gap: 0.8rem;
+  align-items: end;
+  margin-bottom: 0.8rem;
+}
+
+.action-bar {
+  gap: 10px;
+  padding: 10px;
+  background: var(--card);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.action-btn {
+  border: 2px solid var(--brand);
+  border-radius: 30px;
+  background: transparent;
+  color: var(--brand);
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+select.action-btn {
+  padding-right: 2rem;
+}
+
+.action-btn:hover {
+  background: var(--brand);
+  color: #fff;
+}
+
+.trust-extra {
+  margin: 0.2rem 0 0.8rem;
+  font-size: 0.92rem;
+}
+
+.insights {
+  margin-bottom: 0.8rem;
+}
+
+.payments-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.8rem;
+}
+
+.mini-game {
+  margin-bottom: 0.9rem;
+}
+
+.game-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+
+.coin-game-arena {
+  position: relative;
+  height: 220px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(19, 87, 211, 0.08));
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+}
+
+.coin {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.2rem;
+  background: radial-gradient(circle at 30% 30%, #ffe48a, #f5b700);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease, opacity 0.18s ease;
+}
+
+.coin:active {
+  transform: scale(0.92);
+}
+
+.coin.gold {
+  background: radial-gradient(circle at 30% 30%, #fff7b8, #ff9a1f);
+  box-shadow: 0 0 14px rgba(255, 168, 51, 0.8);
+}
+
+.coin.coin-pop {
+  transform: scale(1.35);
+  opacity: 0;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+code {
+  background: rgba(120, 140, 170, 0.15);
+  padding: 0.12rem 0.3rem;
+  border-radius: 6px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1120px;
+}
+
+th,
+td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.93rem;
+}
+
+th {
+  background: #eef3fd;
+}
+
+label {
+  display: grid;
+  gap: 0.2rem;
+  font-weight: 600;
+}
+
+input,
+select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+  background: var(--card);
+  color: var(--text);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.turnover {
+  font-size: 1.6rem;
+  margin: 0;
+  font-weight: 700;
+}
+
+#auth-dialog {
+  border: none;
+  border-radius: 14px;
+  max-width: 420px;
+  width: calc(100% - 2rem);
+  padding: 0;
+}
+
+#auth-dialog::backdrop {
+  background: rgba(10, 20, 35, 0.45);
+}
+
+#auth-form {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  position: relative;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.close-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  border: none;
+  background: transparent;
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+
+@media (max-width: 780px) {
+  .filters {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+body.dark .access-lock {
+  border-color: #d6a53b;
+  background: #2b2414;
+}
+
+body.dark .access-lock h3,
+body.dark .access-lock p {
+  color: #f6d58f;
+}
+
+body.dark .trust-grid .kpi {
+  background: #1a2b43;
+}
+
+body.dark .trust-grid .kpi strong {
+  color: #f3f7ff;
+}
