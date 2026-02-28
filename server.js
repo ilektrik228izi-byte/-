@@ -12,6 +12,9 @@ const TELEMETRY_FILE = path.join(DATA_DIR, 'telemetry.log.ndjson');
 const PAYMENTS_FILE = path.join(DATA_DIR, 'payments.json');
 const AUDIT_FILE = path.join(DATA_DIR, 'audit.log.ndjson');
 const INVITES_FILE = path.join(DATA_DIR, 'invite_tokens.json');
+const TICKETS_FILE = path.join(DATA_DIR, 'tickets.json');
+const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
+const DSR_FILE = path.join(DATA_DIR, 'data_subject_requests.json');
 
 const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || '@username122333bot';
 const TON_WALLET_ADDRESS = process.env.TON_WALLET_ADDRESS || '';
@@ -31,6 +34,10 @@ const REDIS_URL = process.env.REDIS_URL || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const INVOICE_TTL_SEC = Number(process.env.INVOICE_TTL_SEC || 24 * 60 * 60);
 const USDT_RATE_RUB = Number(process.env.USDT_RATE_RUB || 95);
+const DAILY_LIMIT_MEMBER_RUB = Number(process.env.DAILY_LIMIT_MEMBER_RUB || 50000);
+const DAILY_LIMIT_ANALYST_RUB = Number(process.env.DAILY_LIMIT_ANALYST_RUB || 200000);
+const ACTIVE_LIMIT_MEMBER = Number(process.env.ACTIVE_LIMIT_MEMBER || 3);
+const ACTIVE_LIMIT_ANALYST = Number(process.env.ACTIVE_LIMIT_ANALYST || 10);
 
 const ROLE_PERMISSIONS = {
   member: ['payments:create'],
@@ -82,6 +89,12 @@ const readPayments = () => readJsonArray(PAYMENTS_FILE);
 const savePayments = (payments) => writeJsonFile(PAYMENTS_FILE, payments);
 const readInvites = () => readJsonArray(INVITES_FILE);
 const saveInvites = (invites) => writeJsonFile(INVITES_FILE, invites);
+const readTickets = () => readJsonArray(TICKETS_FILE);
+const saveTickets = (tickets) => writeJsonFile(TICKETS_FILE, tickets);
+const readNotifications = () => readJsonArray(NOTIFICATIONS_FILE);
+const saveNotifications = (items) => writeJsonFile(NOTIFICATIONS_FILE, items);
+const readDsr = () => readJsonArray(DSR_FILE);
+const saveDsr = (items) => writeJsonFile(DSR_FILE, items);
 
 const createPasswordHash = (password, salt = crypto.randomBytes(16).toString('hex')) => {
   const hash = crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex');
@@ -103,6 +116,7 @@ const toSessionPublicUser = (user) => ({
   username: user.username,
   telegram: user.telegram || '',
   role: user.role,
+  kycLevel: user.kycLevel || 'basic',
   score: Number(user.score || 0),
   consent: user.consent || { telemetry: true, marketing: false },
   permissions: ROLE_PERMISSIONS[user.role] || []
@@ -301,6 +315,33 @@ const updatePaymentStatus = (payment, status, extra = {}) => {
   payment.history.push({ status, at: payment.updatedAt, ...extra });
 };
 
+const pushNotification = (userId, type, message, meta = {}) => {
+  const items = readNotifications();
+  items.push({ id: crypto.randomUUID(), userId, type, message, meta, createdAt: new Date().toISOString(), read: false });
+  saveNotifications(items);
+};
+
+const getRoleLimits = (role, kycLevel) => {
+  const daily = role === 'analyst' ? DAILY_LIMIT_ANALYST_RUB : DAILY_LIMIT_MEMBER_RUB;
+  const active = role === 'analyst' ? ACTIVE_LIMIT_ANALYST : ACTIVE_LIMIT_MEMBER;
+  if (kycLevel === 'advanced') {
+    return { maxDailyRub: daily * 2, maxActiveDeals: active * 2 };
+  }
+  return { maxDailyRub: daily, maxActiveDeals: active };
+};
+
+const computeTodayVolume = (payments, userId) => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const ts = start.getTime();
+  return payments
+    .filter((p) => p.createdBy?.id === userId && Date.parse(p.createdAt || '') >= ts)
+    .reduce((sum, p) => sum + Number(p.amountRub || 0), 0);
+};
+
+const countActiveDeals = (payments, userId) =>
+  payments.filter((p) => p.createdBy?.id === userId && ['draft', 'pending_chain', 'pending_onchain'].includes(p.status)).length;
+
 const verifyTxHashWithProvider = async (txHash) => {
   const valid = /^[a-fA-F0-9]{32,128}$/.test(txHash);
   return { verified: valid, provider: 'simulated_ton_provider', checkedAt: new Date().toISOString() };
@@ -396,6 +437,7 @@ const authService = {
       username,
       telegram,
       role,
+      kycLevel: 'basic',
       score: 0,
       consent: { telemetry: true, marketing: false },
       passwordHash: createPasswordHash(password),
@@ -450,6 +492,11 @@ const paymentService = {
     if (!idempotencyKey || idempotencyKey.length < 8) return json(res, 400, { ok: false, error: 'idempotencyKey is required (min 8 chars)' });
 
     const payments = readPayments();
+    const limits = getRoleLimits(auth.state.user.role, auth.state.user.kycLevel || 'basic');
+    const todayVolume = computeTodayVolume(payments, auth.state.user.id);
+    const activeDeals = countActiveDeals(payments, auth.state.user.id);
+    if (todayVolume + amountRub > limits.maxDailyRub) return json(res, 400, { ok: false, error: `Daily limit exceeded (${limits.maxDailyRub} RUB)` });
+    if (activeDeals >= limits.maxActiveDeals) return json(res, 400, { ok: false, error: `Active deals limit exceeded (${limits.maxActiveDeals})` });
     const existing = payments.find((p) => p.createdBy?.id === auth.state.user.id && p.idempotencyKey === idempotencyKey);
     if (existing) {
       return json(res, 200, {
@@ -495,6 +542,7 @@ const paymentService = {
     payments.push(payment);
     savePayments(payments);
     recordAudit(req, 'payment.create', { paymentId, username: auth.state.user.username, amountRub: payment.amountRub });
+    pushNotification(auth.state.user.id, 'payment_created', `Платёж ${paymentId} создан`, { paymentId });
 
     json(res, 200, {
       ok: true,
@@ -521,6 +569,9 @@ const paymentService = {
     if (!verify.verified) return json(res, 400, { ok: false, error: 'txHash verification failed' });
 
     const payments = readPayments();
+    const limits = getRoleLimits(auth.state.user.role, auth.state.user.kycLevel || 'basic');
+    const todayVolume = computeTodayVolume(payments, auth.state.user.id);
+    const activeDeals = countActiveDeals(payments, auth.state.user.id);
     const payment = payments.find((p) => p.paymentId === paymentId);
     if (!payment) return json(res, 404, { ok: false, error: 'Payment not found' });
 
@@ -528,6 +579,9 @@ const paymentService = {
     updatePaymentStatus(payment, 'confirmed', { txHash, confirmedBy: auth.state.user.username, provider: verify.provider });
     savePayments(payments);
     recordAudit(req, 'payment.confirm_onchain', { paymentId, txHash, by: auth.state.user.username });
+    if (payment.createdBy?.id) {
+      pushNotification(payment.createdBy.id, 'payment_confirmed', `Платёж ${paymentId} подтверждён`, { paymentId, txHash });
+    }
 
     const users = readUsers();
     const user = users.find((u) => u.id === payment.createdBy?.id);
@@ -816,6 +870,136 @@ const handleMetrics = (_req, res) => {
   res.end(`${lines.join('\n')}\n`);
 };
 
+const handleMePayments = (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  const payments = readPayments().filter((p) => p.createdBy?.id === auth.state.user.id);
+  json(res, 200, { ok: true, total: payments.length, payments: payments.slice(-100).reverse() });
+};
+
+const handleMeNotifications = (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  const items = readNotifications().filter((n) => n.userId === auth.state.user.id).slice(-100).reverse();
+  json(res, 200, { ok: true, notifications: items });
+};
+
+const handleKycUpdate = async (req, res) => {
+  const auth = requireCsrf(req, res);
+  if (!auth) return;
+  const body = await readBody(req);
+  const level = String(body.level || '').trim();
+  if (!['basic', 'advanced'].includes(level)) return json(res, 400, { ok: false, error: 'Invalid kyc level' });
+  const users = readUsers();
+  const user = users.find((u) => u.id === auth.state.user.id);
+  if (!user) return json(res, 404, { ok: false, error: 'User not found' });
+  user.kycLevel = level;
+  saveUsers(users);
+  auth.state.user = toSessionPublicUser(user);
+  recordAudit(req, 'user.kyc.update', { username: user.username, level });
+  pushNotification(user.id, 'kyc_updated', `KYC обновлён: ${level}`, { level });
+  json(res, 200, { ok: true, kycLevel: level, limits: getRoleLimits(user.role, user.kycLevel) });
+};
+
+const handleTicketsCreate = async (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  const body = await readBody(req);
+  const subject = String(body.subject || '').trim().slice(0, 120);
+  const message = String(body.message || '').trim().slice(0, 1000);
+  if (!subject || !message) return json(res, 400, { ok: false, error: 'subject and message required' });
+  const tickets = readTickets();
+  const ticket = {
+    id: crypto.randomUUID(),
+    userId: auth.state.user.id,
+    status: 'open',
+    subject,
+    messages: [{ by: auth.state.user.username, role: auth.state.user.role, text: message, at: new Date().toISOString() }],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  tickets.push(ticket);
+  saveTickets(tickets);
+  recordAudit(req, 'ticket.create', { ticketId: ticket.id, by: auth.state.user.username });
+  json(res, 201, { ok: true, ticket });
+};
+
+const handleTicketsList = (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  const tickets = readTickets();
+  const visible = auth.state.user.role === 'admin' ? tickets : tickets.filter((t) => t.userId === auth.state.user.id);
+  json(res, 200, { ok: true, tickets: visible.slice(-200).reverse() });
+};
+
+const handleTicketsReply = async (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  const body = await readBody(req);
+  const ticketId = String(body.ticketId || '').trim();
+  const text = String(body.message || '').trim().slice(0, 1000);
+  if (!ticketId || !text) return json(res, 400, { ok: false, error: 'ticketId and message required' });
+  const tickets = readTickets();
+  const ticket = tickets.find((t) => t.id === ticketId);
+  if (!ticket) return json(res, 404, { ok: false, error: 'Ticket not found' });
+  if (auth.state.user.role !== 'admin' && ticket.userId !== auth.state.user.id) return json(res, 403, { ok: false, error: 'Forbidden' });
+  ticket.messages.push({ by: auth.state.user.username, role: auth.state.user.role, text, at: new Date().toISOString() });
+  ticket.updatedAt = new Date().toISOString();
+  saveTickets(tickets);
+  recordAudit(req, 'ticket.reply', { ticketId, by: auth.state.user.username });
+  json(res, 200, { ok: true, ticket });
+};
+
+const handlePolicy = (_req, res) => {
+  json(res, 200, {
+    ok: true,
+    privacy: 'Мы собираем только необходимые продуктовые и технические данные для функционирования сервиса.',
+    terms: 'Используя сервис, пользователь соглашается с правилами платежей, KYC и обработки данных.',
+    compliance: {
+      ru152fz: true,
+      gdprMapping: true,
+      dpaReady: true
+    }
+  });
+};
+
+const handleDataExport = (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  const users = readUsers();
+  const me = users.find((u) => u.id === auth.state.user.id);
+  const payments = readPayments().filter((p) => p.createdBy?.id === auth.state.user.id);
+  const tickets = readTickets().filter((t) => t.userId === auth.state.user.id);
+  const notifications = readNotifications().filter((n) => n.userId === auth.state.user.id);
+  json(res, 200, { ok: true, export: { user: me ? toSessionPublicUser(me) : null, payments, tickets, notifications } });
+};
+
+const handleDataDeletionRequest = async (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  const body = await readBody(req);
+  const reason = String(body.reason || '').slice(0, 300);
+  const dsr = readDsr();
+  dsr.push({ id: crypto.randomUUID(), userId: auth.state.user.id, type: 'delete_request', reason, status: 'open', createdAt: new Date().toISOString() });
+  saveDsr(dsr);
+  recordAudit(req, 'dsr.delete.requested', { by: auth.state.user.username });
+  json(res, 202, { ok: true, status: 'queued' });
+};
+
+const handleAdminChecklist = (req, res) => {
+  const auth = requirePermission(req, res, 'users:manage');
+  if (!auth) return;
+  json(res, 200, {
+    ok: true,
+    checklist: [
+      { id: 'consent_policy', title: 'Проверить consent и privacy policy', done: false },
+      { id: 'kyc_limits', title: 'Проверить KYC лимиты ролей', done: false },
+      { id: 'reconcile_daily', title: 'Запустить reconcile job', done: false },
+      { id: 'backup', title: 'Проверить backup/restore тест', done: false }
+    ]
+  });
+};
+
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -894,6 +1078,24 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && route === '/api/admin/analytics/anomalies') return handleAdminAnomalies(req, res);
 
     if (req.method === 'POST' && route === '/api/webhooks/telegram/payment-confirmed') return handleWebhookTelegramPaymentConfirmed(req, res);
+
+
+    if (req.method === 'GET' && route === '/api/me/payments') return handleMePayments(req, res);
+    if (req.method === 'GET' && route === '/api/me/notifications') return handleMeNotifications(req, res);
+    if (req.method === 'POST' && route === '/api/me/kyc') return handleKycUpdate(req, res);
+
+    if (req.method === 'POST' && route === '/api/tickets') return handleTicketsCreate(req, res);
+    if (req.method === 'GET' && route === '/api/tickets') return handleTicketsList(req, res);
+    if (req.method === 'POST' && route === '/api/tickets/reply') return handleTicketsReply(req, res);
+
+    if (req.method === 'GET' && route === '/api/legal/policy') return handlePolicy(req, res);
+    if (req.method === 'GET' && route === '/api/legal/data-export') return handleDataExport(req, res);
+    if (req.method === 'POST' && route === '/api/legal/data-delete-request') return handleDataDeletionRequest(req, res);
+
+    if (req.method === 'GET' && route === '/api/admin/checklist') return handleAdminChecklist(req, res);
+
+    if (req.method === 'GET' && route === '/healthz') return handleHealth(req, res);
+    if (req.method === 'GET' && route === '/readyz') return handleHealth(req, res);
 
     return serveStatic(req, res);
   } catch (error) {
