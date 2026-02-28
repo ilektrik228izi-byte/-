@@ -230,11 +230,17 @@ let currentSession = null;
 const getSession = () => currentSession;
 
 const apiFetch = async (url, options = {}) => {
+  const method = String(options.method || "GET").toUpperCase();
+  const csrfHeader = method !== "GET" && currentSession?.csrfToken
+    ? { "X-CSRF-Token": currentSession.csrfToken }
+    : {};
+
   const response = await fetch(url, {
     credentials: "include",
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...csrfHeader,
       ...(options.headers || {})
     }
   });

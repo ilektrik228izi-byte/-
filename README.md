@@ -1,23 +1,32 @@
 # ОДКБ — MVP с разделением demo/prod логики
 
-В репозитории теперь есть frontend + backend-слой с нормальной серверной авторизацией, ролями и ACL.
+В репозитории есть frontend + backend-слой с серверной авторизацией, ролями/ACL и crypto-only платежами.
 
-## Что изменено по архитектуре
+## Что усилено в этом релизе
 
-- **Auth вынесен на backend**:
+- Серверные сессии с TTL (`SESSION_TTL_SEC`) и периодической очисткой.
+- CSRF-защита для state-changing endpoint’ов (logout / create-payment).
+- Базовый rate-limit по IP для auth и платежных endpoint’ов.
+- Security headers для API и статики.
+
+## Архитектура (кратко)
+
+- **Auth на backend**:
   - `POST /api/auth/register`
   - `POST /api/auth/login`
   - `GET /api/auth/session`
   - `POST /api/auth/logout`
-- **Роли и ACL на сервере**:
+- **Роли и ACL**:
   - `member`
   - `analyst` (`confidential:view`, `telemetry:view`)
   - `admin` (`confidential:view`, `telemetry:view`, `users:manage`, `payments:manage`)
-- **Payments на backend**:
-  - `POST /api/payments/telegram-crypto/create` только для авторизованных пользователей.
-- **Sensitive-настройки убраны из клиентского кода**:
-  - бот/кошелёк берутся через `GET /api/public/runtime` из env backend.
-- **DonationAlerts заморожен**: только Telegram + TON/USDT.
+- **Payments**:
+  - `POST /api/payments/telegram-crypto/create` (только авторизованная сессия + CSRF).
+- **Runtime config**:
+  - `GET /api/public/runtime` возвращает безопасные публичные настройки для клиента.
+- **Telemetry**:
+  - `POST /api/telemetry/collect`
+  - `GET /api/telemetry/summary` (только с правом `telemetry:view`).
 
 ## Запуск
 
@@ -30,15 +39,15 @@ node server.js
 
 ## Production рекомендации
 
-1. Установить реальные `ADMIN_PASSWORD`, `ROLE_ELEVATION_CODE`, кошельки и токены через env/secret manager.
-2. Включить reverse proxy + TLS.
-3. Поставить persistent storage/DB вместо файлов.
-4. Добавить rotation и retention policy для логов телеметрии.
+1. Вынести users/sessions/payments/telemetry из файлов в Postgres + Redis.
+2. Подключить reverse proxy + TLS.
+3. Добавить централизованные логи, алерты и бэкапы.
+4. Добавить CI с интеграционными тестами API.
 5. Добавить публичную политику обработки персональных данных.
 
 ## Данные/хранилище
 
-- `data/users.json` — пользователи (хеши паролей PBKDF2).
+- `data/users.json` — пользователи (хеши PBKDF2).
 - `data/payments.log.ndjson` — журнал заявок платежей.
 - `data/telemetry.log.ndjson` — журнал телеметрии.
 

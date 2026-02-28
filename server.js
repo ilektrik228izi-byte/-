@@ -17,6 +17,11 @@ const TELEMETRY_ENABLED = String(process.env.TELEMETRY_ENABLED || 'true').toLowe
 const ROLE_ELEVATION_CODE = process.env.ROLE_ELEVATION_CODE || '';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change_me_admin_password';
+const SESSION_TTL_SEC = Number(process.env.SESSION_TTL_SEC || 60 * 60 * 24 * 30);
+const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 60_000);
+const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX || 20);
+const PAYMENTS_RATE_LIMIT_WINDOW_MS = Number(process.env.PAYMENTS_RATE_LIMIT_WINDOW_MS || 60_000);
+const PAYMENTS_RATE_LIMIT_MAX = Number(process.env.PAYMENTS_RATE_LIMIT_MAX || 40);
 
 const ROLE_PERMISSIONS = {
   member: [],
@@ -24,11 +29,23 @@ const ROLE_PERMISSIONS = {
   admin: ['confidential:view', 'telemetry:view', 'users:manage', 'payments:manage']
 };
 
+/** @type {Map<string, {user: any, csrfToken: string, expiresAt: number}>} */
 const sessions = new Map();
+const authRateBuckets = new Map();
+const paymentsRateBuckets = new Map();
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
+
+const now = () => Date.now();
+
+const securityHeaders = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=()'
+};
 
 const writeJsonFile = (filePath, payload) => {
   fs.writeFileSync(filePath, JSON.stringify(payload, null, 2));
@@ -61,6 +78,7 @@ const verifyPassword = (password, encoded) => {
   if (!salt || !expectedHash) {
     return false;
   }
+
   const calculated = crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex');
   const expectedBuffer = Buffer.from(expectedHash, 'hex');
   const calculatedBuffer = Buffer.from(calculated, 'hex');
@@ -100,6 +118,17 @@ const ensureAdminUser = () => {
 
 ensureAdminUser();
 
+const pruneExpiredSessions = () => {
+  const ts = now();
+  for (const [sid, state] of sessions.entries()) {
+    if (!state || state.expiresAt <= ts) {
+      sessions.delete(sid);
+    }
+  }
+};
+
+setInterval(pruneExpiredSessions, 60_000).unref();
+
 const parseCookies = (req) => {
   const raw = req.headers.cookie || '';
   return raw.split(';').reduce((acc, item) => {
@@ -136,6 +165,7 @@ const json = (res, statusCode, payload, extraHeaders = {}) => {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    ...securityHeaders,
     ...extraHeaders
   });
   res.end(JSON.stringify(payload));
@@ -174,46 +204,103 @@ const appendNdjson = (filePath, payload) => {
   });
 };
 
-const getSessionUser = (req) => {
+const getSessionState = (req) => {
   const sid = parseCookies(req).sid;
   if (!sid) {
     return null;
   }
-  return sessions.get(sid) || null;
+
+  const state = sessions.get(sid);
+  if (!state || state.expiresAt <= now()) {
+    sessions.delete(sid);
+    return null;
+  }
+
+  return { sid, state };
 };
 
+const getSessionUser = (req) => getSessionState(req)?.state.user || null;
+
 const requireAuth = (req, res) => {
-  const user = getSessionUser(req);
-  if (!user) {
+  const data = getSessionState(req);
+  if (!data) {
     json(res, 401, { ok: false, error: 'Unauthorized' });
     return null;
   }
-  return user;
+
+  return data;
 };
 
 const requirePermission = (req, res, permission) => {
-  const user = requireAuth(req, res);
-  if (!user) {
+  const auth = requireAuth(req, res);
+  if (!auth) {
     return null;
   }
 
-  const permissions = ROLE_PERMISSIONS[user.role] || [];
+  const permissions = ROLE_PERMISSIONS[auth.state.user.role] || [];
   if (!permissions.includes(permission)) {
     json(res, 403, { ok: false, error: 'Forbidden' });
     return null;
   }
 
-  return user;
+  return auth;
+};
+
+const requireCsrf = (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) {
+    return null;
+  }
+
+  const token = req.headers['x-csrf-token'];
+  if (!token || String(token) !== auth.state.csrfToken) {
+    json(res, 403, { ok: false, error: 'Invalid CSRF token' });
+    return null;
+  }
+
+  return auth;
+};
+
+const consumeRateLimit = (map, key, windowMs, maxRequests) => {
+  const ts = now();
+  const bucket = map.get(key);
+  if (!bucket || bucket.resetAt <= ts) {
+    map.set(key, { count: 1, resetAt: ts + windowMs });
+    return { ok: true, remaining: maxRequests - 1, retryAfterSec: Math.ceil(windowMs / 1000) };
+  }
+
+  if (bucket.count >= maxRequests) {
+    return { ok: false, remaining: 0, retryAfterSec: Math.ceil((bucket.resetAt - ts) / 1000) };
+  }
+
+  bucket.count += 1;
+  return { ok: true, remaining: Math.max(0, maxRequests - bucket.count), retryAfterSec: Math.ceil((bucket.resetAt - ts) / 1000) };
+};
+
+const enforceRateLimit = (req, res, map, scope, windowMs, maxRequests) => {
+  const key = `${scope}:${getIp(req)}`;
+  const info = consumeRateLimit(map, key, windowMs, maxRequests);
+  if (!info.ok) {
+    json(res, 429, { ok: false, error: 'Too many requests', retryAfterSec: info.retryAfterSec });
+    return false;
+  }
+  return true;
 };
 
 const createSession = (res, user) => {
   const sid = crypto.randomUUID();
-  sessions.set(sid, user);
-  const cookie = `sid=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`;
-  return { sid, cookie };
+  const csrfToken = crypto.randomBytes(24).toString('hex');
+  const expiresAt = now() + SESSION_TTL_SEC * 1000;
+  sessions.set(sid, { user, csrfToken, expiresAt });
+  const cookie = `sid=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SEC}`;
+  return { sid, csrfToken, cookie };
 };
 
 const handleRegister = async (req, res) => {
+  if (!enforceRateLimit(req, res, authRateBuckets, 'auth-register', AUTH_RATE_LIMIT_WINDOW_MS, AUTH_RATE_LIMIT_MAX)) {
+    return;
+  }
+
   try {
     const body = await readBody(req);
     const username = String(body.username || '').trim();
@@ -251,14 +338,18 @@ const handleRegister = async (req, res) => {
     saveUsers(users);
 
     const sessionUser = toSessionPublicUser(user);
-    const { cookie } = createSession(res, sessionUser);
-    json(res, 201, { ok: true, session: sessionUser }, { 'Set-Cookie': cookie });
+    const { cookie, csrfToken } = createSession(res, sessionUser);
+    json(res, 201, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
   } catch (error) {
     json(res, 400, { ok: false, error: error.message });
   }
 };
 
 const handleLogin = async (req, res) => {
+  if (!enforceRateLimit(req, res, authRateBuckets, 'auth-login', AUTH_RATE_LIMIT_WINDOW_MS, AUTH_RATE_LIMIT_MAX)) {
+    return;
+  }
+
   try {
     const body = await readBody(req);
     const username = String(body.username || '').trim();
@@ -278,24 +369,30 @@ const handleLogin = async (req, res) => {
     }
 
     const sessionUser = toSessionPublicUser(user);
-    const { cookie } = createSession(res, sessionUser);
-    json(res, 200, { ok: true, session: sessionUser }, { 'Set-Cookie': cookie });
+    const { cookie, csrfToken } = createSession(res, sessionUser);
+    json(res, 200, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
   } catch (error) {
     json(res, 400, { ok: false, error: error.message });
   }
 };
 
 const handleSession = (req, res) => {
-  const user = getSessionUser(req);
-  json(res, 200, { ok: true, session: user });
+  const auth = getSessionState(req);
+  if (!auth) {
+    json(res, 200, { ok: true, session: null });
+    return;
+  }
+
+  json(res, 200, { ok: true, session: { ...auth.state.user, csrfToken: auth.state.csrfToken } });
 };
 
 const handleLogout = (req, res) => {
-  const sid = parseCookies(req).sid;
-  if (sid) {
-    sessions.delete(sid);
+  const auth = requireCsrf(req, res);
+  if (!auth) {
+    return;
   }
 
+  sessions.delete(auth.sid);
   json(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' });
 };
 
@@ -338,8 +435,8 @@ const handleTelemetryCollect = async (req, res) => {
 };
 
 const handleTelemetrySummary = (req, res) => {
-  const user = requirePermission(req, res, 'telemetry:view');
-  if (!user) {
+  const auth = requirePermission(req, res, 'telemetry:view');
+  if (!auth) {
     return;
   }
 
@@ -359,7 +456,7 @@ const handleTelemetrySummary = (req, res) => {
 
   json(res, 200, {
     ok: true,
-    requestedBy: user.username,
+    requestedBy: auth.state.user.username,
     totalEvents: parsed.length,
     uniqueUsers: new Set(parsed.map((item) => item.user?.username).filter(Boolean)).size,
     lastEvents: parsed.slice(-10)
@@ -367,8 +464,12 @@ const handleTelemetrySummary = (req, res) => {
 };
 
 const handleCreateCryptoPayment = async (req, res) => {
-  const user = requireAuth(req, res);
-  if (!user) {
+  if (!enforceRateLimit(req, res, paymentsRateBuckets, 'payments-create', PAYMENTS_RATE_LIMIT_WINDOW_MS, PAYMENTS_RATE_LIMIT_MAX)) {
+    return;
+  }
+
+  const auth = requireCsrf(req, res);
+  if (!auth) {
     return;
   }
 
@@ -393,7 +494,7 @@ const handleCreateCryptoPayment = async (req, res) => {
       wallet: TON_WALLET_ADDRESS,
       description,
       metadata: body.metadata || null,
-      createdBy: { id: user.id, username: user.username, role: user.role },
+      createdBy: { id: auth.state.user.id, username: auth.state.user.username, role: auth.state.user.role },
       server: collectServerContext(req)
     };
 
@@ -437,20 +538,20 @@ const serveStatic = (req, res) => {
   const filePath = path.join(PUBLIC_DIR, safePath);
 
   if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403);
+    res.writeHead(403, securityHeaders);
     res.end('Forbidden');
     return;
   }
 
   fs.readFile(filePath, (err, file) => {
     if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...securityHeaders });
       res.end('Not Found');
       return;
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream', ...securityHeaders });
     res.end(file);
   });
 };
