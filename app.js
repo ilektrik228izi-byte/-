@@ -22,12 +22,6 @@ const PAYMENTS_CONFIG = {
     endpoint: "/api/payments/telegram-crypto/create",
     network: "TON / USDT (TON)",
     wallet: TON_WALLET_ADDRESS
-  },
-  donationalerts: {
-    label: "DonationAlerts",
-    recipient: "https://www.donationalerts.com/r/your_name",
-    endpoint: "",
-    currency: "RUB"
   }
 };
 
@@ -171,6 +165,7 @@ const trackBehavior = (eventName) => {
   const stats = readJSON(STORAGE_KEYS.behaviorStats, {});
   stats[eventName] = (stats[eventName] || 0) + 1;
   saveJSON(STORAGE_KEYS.behaviorStats, stats);
+  sendTelemetry(eventName);
 };
 
 const renderBehaviorStats = () => {
@@ -225,9 +220,49 @@ const applyTheme = (theme) => {
   themeToggle.textContent = dark ? "☀️ Светлая тема" : "🌙 Тёмная тема";
 };
 
+const TELEMETRY_ENDPOINT = "/api/telemetry/collect";
 
+const collectClientContext = () => ({
+  path: location.pathname,
+  url: location.href,
+  referrer: document.referrer || null,
+  language: navigator.language || null,
+  languages: navigator.languages || [],
+  platform: navigator.platform || null,
+  userAgent: navigator.userAgent,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+  screen: {
+    width: window.screen?.width || null,
+    height: window.screen?.height || null,
+    pixelRatio: window.devicePixelRatio || 1
+  },
+  doNotTrack: navigator.doNotTrack || null,
+  cookieEnabled: navigator.cookieEnabled
+});
 
-const getPaymentMethodConfig = () => PAYMENTS_CONFIG[paymentsMethod.value];
+const sendTelemetry = (eventName, extra = null) => {
+  if (!eventName || eventName.startsWith("phrase_show")) {
+    return;
+  }
+
+  const session = getSession();
+  const payload = {
+    event: eventName,
+    page: location.pathname,
+    user: session ? { username: session.username, telegram: session.telegram || null } : null,
+    client: collectClientContext(),
+    extra
+  };
+
+  fetch(TELEMETRY_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    keepalive: true
+  }).catch(() => {});
+};
+
+const getPaymentMethodConfig = () => PAYMENTS_CONFIG[paymentsMethod.value] || PAYMENTS_CONFIG.telegram_usdt;
 
 const buildPaymentPayload = (amount, description) => {
   const session = getSession();
@@ -285,6 +320,8 @@ const handlePaymentSubmit = async (event) => {
   const payload = buildPaymentPayload(amount, description);
   const config = getPaymentMethodConfig();
 
+  sendTelemetry("payment_submit", { method: paymentsMethod.value, amount: payload.amount });
+
   if (config.endpoint) {
     const response = await fetch(config.endpoint, {
       method: "POST",
@@ -293,29 +330,33 @@ const handlePaymentSubmit = async (event) => {
     });
 
     if (!response.ok) {
-      alert("Ошибка API. Проверьте endpoint.");
+      alert("Ошибка API. Проверьте backend-слой и endpoint.");
+      sendTelemetry("payment_submit_failed", { reason: "api_not_ok", status: response.status });
       return;
     }
 
     const data = await response.json();
-    const redirectUrl = data?.redirect_url || data?.payment_url;
-    if (redirectUrl) {
-      window.location.href = redirectUrl;
+    const link = data?.paymentUrl || data?.deepLink || data?.payment_url || data?.redirect_url || "";
+
+    if (link) {
+      paymentsStatus.textContent = `✅ Платёж создан: ${link}`;
+      sendTelemetry("payment_submit_success", { paymentId: data.paymentId || null });
+      window.open(link, "_blank", "noopener,noreferrer");
       return;
     }
 
     alert("Платеж создан, но ссылка не получена. Проверьте ответ API.");
+    paymentsStatus.textContent = "⚠️ Платеж создан без ссылки. Нужна ручная проверка ответа API.";
+    sendTelemetry("payment_submit_warning", { reason: "missing_link" });
     return;
   }
 
-  if (paymentsMethod.value === "telegram_usdt") {
-    const botName = config.recipient.replace(/^@/, "");
-    const deepLink = `https://t.me/${botName}?start=pay_${encodeURIComponent(payload.amount)}`;
-    const walletPart = config.wallet ? `\nTON address: ${config.wallet}` : "";
-    alert(`Отправьте клиенту: сумма ${payload.amount} (${config.network}), бот ${config.recipient}.\nDeep link: ${deepLink}${walletPart}`);
-  } else {
-    alert(`Отправьте клиенту DonationAlerts ссылку: ${config.recipient} и подтвердите платеж вручную.`);
-  }
+  const botName = config.recipient.replace(/^@/, "");
+  const deepLink = `https://t.me/${botName}?start=pay_${encodeURIComponent(payload.amount)}`;
+  const walletPart = config.wallet ? `
+TON address: ${config.wallet}` : "";
+  alert(`Отправьте клиенту: сумма ${payload.amount} (${config.network}), бот ${config.recipient}.
+Deep link: ${deepLink}${walletPart}`);
 };
 
 let gameTimerId = null;
@@ -390,7 +431,8 @@ const stopCoinGame = () => {
   if (session?.username) {
     saveCoinGameScore(session.username, gameScore);
     renderCoinGameLeaderboard();
-renderBehaviorStats();
+    renderBehaviorStats();
+    sendTelemetry("coin_game_finish", { score: gameScore });
   }
 };
 
@@ -823,6 +865,7 @@ applyTheme(storedTheme);
 
 setAuthMode(false);
 updateSessionUI();
+sendTelemetry("page_open");
 renderBoard();
 renderPublicTrustStats();
 renderLoanBookStats();

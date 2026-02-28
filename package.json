@@ -1,0 +1,10 @@
+{
+  "name": "odkb-mvp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static MVP with built-in Node backend for crypto payments and telemetry",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check app.js && node --check server.js"
+  }
+}
