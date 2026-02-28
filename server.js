@@ -11,11 +11,11 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const TELEMETRY_FILE = path.join(DATA_DIR, 'telemetry.log.ndjson');
 const PAYMENTS_FILE = path.join(DATA_DIR, 'payments.json');
 const AUDIT_FILE = path.join(DATA_DIR, 'audit.log.ndjson');
+const INVITES_FILE = path.join(DATA_DIR, 'invite_tokens.json');
 
 const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || '@username122333bot';
 const TON_WALLET_ADDRESS = process.env.TON_WALLET_ADDRESS || '';
 const TELEMETRY_ENABLED = String(process.env.TELEMETRY_ENABLED || 'true').toLowerCase() !== 'false';
-const ROLE_ELEVATION_CODE = process.env.ROLE_ELEVATION_CODE || '';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change_me_admin_password';
 const SESSION_TTL_SEC = Number(process.env.SESSION_TTL_SEC || 60 * 60 * 24 * 30);
@@ -28,76 +28,60 @@ const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 90);
 const CONSENT_REQUIRED = String(process.env.CONSENT_REQUIRED || 'true').toLowerCase() !== 'false';
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const REDIS_URL = process.env.REDIS_URL || '';
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+const INVOICE_TTL_SEC = Number(process.env.INVOICE_TTL_SEC || 24 * 60 * 60);
+const USDT_RATE_RUB = Number(process.env.USDT_RATE_RUB || 95);
 
 const ROLE_PERMISSIONS = {
-  member: [],
-  analyst: ['confidential:view', 'telemetry:view'],
-  admin: ['confidential:view', 'telemetry:view', 'users:manage', 'payments:manage']
+  member: ['payments:create'],
+  analyst: ['payments:create', 'confidential:view', 'telemetry:view'],
+  admin: ['payments:create', 'payments:manage', 'confidential:view', 'telemetry:view', 'users:manage']
 };
 
-/** @type {Map<string, {user: any, csrfToken: string, expiresAt: number}>} */
 const sessions = new Map();
 const authRateBuckets = new Map();
 const paymentsRateBuckets = new Map();
-
 const metrics = {
   requests: 0,
   authLogin: 0,
   authRegister: 0,
   paymentCreate: 0,
   telemetryCollect: 0,
-  reconcileRuns: 0
+  reconcileRuns: 0,
+  queueProcessed: 0
 };
+const jobQueue = [];
 
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const now = () => Date.now();
 const USERNAME_RE = /^[A-Za-z0-9_]{3,32}$/;
+const EVENT_RE = /^[a-z0-9_:.\-]{2,80}$/i;
 
 const securityHeaders = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Permissions-Policy': 'geolocation=(), microphone=(), camera=()'
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+  'Content-Security-Policy': "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'"
 };
 
-const writeJsonFile = (filePath, payload) => {
-  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2));
-};
-
-const readUsers = () => {
-  if (!fs.existsSync(USERS_FILE)) {
-    return [];
-  }
+const writeJsonFile = (filePath, payload) => fs.writeFileSync(filePath, JSON.stringify(payload, null, 2));
+const readJsonArray = (filePath) => {
+  if (!fs.existsSync(filePath)) return [];
   try {
-    const parsed = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 };
-
-const saveUsers = (users) => {
-  writeJsonFile(USERS_FILE, users);
-};
-
-const readPayments = () => {
-  if (!fs.existsSync(PAYMENTS_FILE)) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(fs.readFileSync(PAYMENTS_FILE, 'utf-8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const savePayments = (payments) => {
-  writeJsonFile(PAYMENTS_FILE, payments);
-};
+const readUsers = () => readJsonArray(USERS_FILE);
+const saveUsers = (users) => writeJsonFile(USERS_FILE, users);
+const readPayments = () => readJsonArray(PAYMENTS_FILE);
+const savePayments = (payments) => writeJsonFile(PAYMENTS_FILE, payments);
+const readInvites = () => readJsonArray(INVITES_FILE);
+const saveInvites = (invites) => writeJsonFile(INVITES_FILE, invites);
 
 const createPasswordHash = (password, salt = crypto.randomBytes(16).toString('hex')) => {
   const hash = crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex');
@@ -126,52 +110,23 @@ const toSessionPublicUser = (user) => ({
 
 const ensureAdminUser = () => {
   const users = readUsers();
-  const exists = users.some((user) => user.username.toLowerCase() === ADMIN_USERNAME.toLowerCase());
+  const exists = users.some((u) => u.username.toLowerCase() === ADMIN_USERNAME.toLowerCase());
   if (exists) return;
   users.push({
     id: crypto.randomUUID(),
     username: ADMIN_USERNAME,
     telegram: '',
     role: 'admin',
-    consent: { telemetry: true, marketing: false },
     score: 0,
+    consent: { telemetry: true, marketing: false },
     passwordHash: createPasswordHash(ADMIN_PASSWORD),
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    passwordChangedAt: new Date().toISOString(),
+    passwordHistory: []
   });
   saveUsers(users);
-  console.log(`Bootstrap admin created: ${ADMIN_USERNAME}`);
 };
-
 ensureAdminUser();
-
-const pruneExpiredSessions = () => {
-  const ts = now();
-  for (const [sid, state] of sessions.entries()) {
-    if (!state || state.expiresAt <= ts) sessions.delete(sid);
-  }
-};
-
-const cleanupOldNdjson = (filePath, days) => {
-  if (!fs.existsSync(filePath)) return;
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-  const kept = lines.filter((line) => {
-    try {
-      const parsed = JSON.parse(line);
-      const ts = Date.parse(parsed?.server?.collectedAt || parsed?.createdAt || '');
-      return Number.isFinite(ts) ? ts >= cutoff : true;
-    } catch {
-      return false;
-    }
-  });
-  fs.writeFileSync(filePath, `${kept.join('\n')}${kept.length ? '\n' : ''}`);
-};
-
-setInterval(pruneExpiredSessions, 60_000).unref();
-setInterval(() => {
-  cleanupOldNdjson(TELEMETRY_FILE, RETENTION_DAYS);
-  cleanupOldNdjson(AUDIT_FILE, RETENTION_DAYS);
-}, 6 * 60 * 60 * 1000).unref();
 
 const parseCookies = (req) => {
   const raw = req.headers.cookie || '';
@@ -211,40 +166,32 @@ const json = (res, statusCode, payload, extraHeaders = {}) => {
   res.end(JSON.stringify(payload));
 };
 
-const readBody = (req) =>
-  new Promise((resolve, reject) => {
-    let raw = '';
-    req.on('data', (chunk) => {
-      raw += chunk;
-      if (raw.length > 1_000_000) {
-        reject(new Error('Payload too large'));
-        req.destroy();
-      }
-    });
-    req.on('end', () => {
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-    req.on('error', reject);
+const readBody = (req) => new Promise((resolve, reject) => {
+  let raw = '';
+  req.on('data', (chunk) => {
+    raw += chunk;
+    if (raw.length > 1_000_000) {
+      reject(new Error('Payload too large'));
+      req.destroy();
+    }
   });
+  req.on('end', () => {
+    if (!raw) return resolve({});
+    try {
+      resolve(JSON.parse(raw));
+    } catch {
+      reject(new Error('Invalid JSON'));
+    }
+  });
+  req.on('error', reject);
+});
 
 const appendNdjson = (filePath, payload) => {
-  fs.appendFile(filePath, `${JSON.stringify(payload)}\n`, (err) => {
-    if (err) console.error(`Failed to write ${filePath}:`, err.message);
-  });
+  fs.appendFile(filePath, `${JSON.stringify(payload)}\n`, () => {});
 };
 
 const recordAudit = (req, action, details = {}) => {
-  appendNdjson(AUDIT_FILE, {
-    id: crypto.randomUUID(),
-    action,
-    details,
-    server: collectServerContext(req)
-  });
+  appendNdjson(AUDIT_FILE, { id: crypto.randomUUID(), action, details, server: collectServerContext(req) });
 };
 
 const getSessionState = (req) => {
@@ -257,18 +204,16 @@ const getSessionState = (req) => {
   }
   return { sid, state };
 };
-
 const getSessionUser = (req) => getSessionState(req)?.state.user || null;
 
 const requireAuth = (req, res) => {
-  const data = getSessionState(req);
-  if (!data) {
+  const auth = getSessionState(req);
+  if (!auth) {
     json(res, 401, { ok: false, error: 'Unauthorized' });
     return null;
   }
-  return data;
+  return auth;
 };
-
 const requirePermission = (req, res, permission) => {
   const auth = requireAuth(req, res);
   if (!auth) return null;
@@ -279,7 +224,6 @@ const requirePermission = (req, res, permission) => {
   }
   return auth;
 };
-
 const requireCsrf = (req, res) => {
   const auth = requireAuth(req, res);
   if (!auth) return null;
@@ -298,20 +242,27 @@ const consumeRateLimit = (map, key, windowMs, maxRequests) => {
     map.set(key, { count: 1, resetAt: ts + windowMs });
     return { ok: true, retryAfterSec: Math.ceil(windowMs / 1000) };
   }
-  if (bucket.count >= maxRequests) {
-    return { ok: false, retryAfterSec: Math.ceil((bucket.resetAt - ts) / 1000) };
-  }
+  if (bucket.count >= maxRequests) return { ok: false, retryAfterSec: Math.ceil((bucket.resetAt - ts) / 1000) };
   bucket.count += 1;
   return { ok: true, retryAfterSec: Math.ceil((bucket.resetAt - ts) / 1000) };
 };
 
-const enforceRateLimit = (req, res, map, scope, windowMs, maxRequests) => {
-  const key = `${scope}:${getIp(req)}`;
-  const info = consumeRateLimit(map, key, windowMs, maxRequests);
-  if (!info.ok) {
-    json(res, 429, { ok: false, error: 'Too many requests', retryAfterSec: info.retryAfterSec });
+const enforceRateLimit = (req, res, map, scope, windowMs, maxRequests, extraKey = '') => {
+  const base = `${scope}:${getIp(req)}`;
+  const ipRes = consumeRateLimit(map, base, windowMs, maxRequests);
+  if (!ipRes.ok) {
+    json(res, 429, { ok: false, error: 'Too many requests', retryAfterSec: ipRes.retryAfterSec });
     return false;
   }
+
+  if (extraKey) {
+    const keyed = consumeRateLimit(map, `${scope}:user:${extraKey}`, windowMs, maxRequests);
+    if (!keyed.ok) {
+      json(res, 429, { ok: false, error: 'Too many requests', retryAfterSec: keyed.retryAfterSec });
+      return false;
+    }
+  }
+
   return true;
 };
 
@@ -325,188 +276,39 @@ const createSession = (res, user) => {
   return { sid, csrfToken, cookie };
 };
 
+const consumeInviteToken = (token) => {
+  if (!token) return null;
+  const invites = readInvites();
+  const idx = invites.findIndex((i) => i.token === token && !i.usedAt && (!i.expiresAt || Date.parse(i.expiresAt) > Date.now()));
+  if (idx < 0) return null;
+  invites[idx].usedAt = new Date().toISOString();
+  saveInvites(invites);
+  return invites[idx];
+};
+
 const recalcUserScore = (user) => {
   const payments = readPayments().filter((p) => p.createdBy?.id === user.id);
   const confirmed = payments.filter((p) => p.status === 'confirmed').length;
-  const delayed = payments.filter((p) => p.status === 'expired').length;
-  user.score = Math.max(0, confirmed * 10 - delayed * 5);
+  const refunded = payments.filter((p) => p.status === 'refunded').length;
+  const expired = payments.filter((p) => p.status === 'expired').length;
+  user.score = Math.max(0, confirmed * 10 - refunded * 7 - expired * 5);
 };
 
-const handleRegister = async (req, res) => {
-  metrics.authRegister += 1;
-  if (!enforceRateLimit(req, res, authRateBuckets, 'auth-register', AUTH_RATE_LIMIT_WINDOW_MS, AUTH_RATE_LIMIT_MAX)) return;
-
-  try {
-    const body = await readBody(req);
-    const username = String(body.username || '').trim();
-    const password = String(body.password || '');
-    const telegram = String(body.telegram || '').trim().replace(/^@/, '');
-    const accessCode = String(body.accessCode || '').trim();
-
-    if (!username || !USERNAME_RE.test(username)) {
-      json(res, 400, { ok: false, error: 'Username must be 3-32 chars: letters, numbers, underscore' });
-      return;
-    }
-    if (!password || password.length < 8) {
-      json(res, 400, { ok: false, error: 'Password too short (min 8)' });
-      return;
-    }
-
-    const users = readUsers();
-    const exists = users.some((user) => user.username.toLowerCase() === username.toLowerCase());
-    if (exists) {
-      json(res, 409, { ok: false, error: 'User already exists' });
-      return;
-    }
-
-    const role = accessCode && ROLE_ELEVATION_CODE && accessCode === ROLE_ELEVATION_CODE ? 'analyst' : 'member';
-    const user = {
-      id: crypto.randomUUID(),
-      username,
-      telegram,
-      role,
-      score: 0,
-      consent: { telemetry: true, marketing: false },
-      passwordHash: createPasswordHash(password),
-      createdAt: new Date().toISOString()
-    };
-
-    users.push(user);
-    saveUsers(users);
-    const sessionUser = toSessionPublicUser(user);
-    const { cookie, csrfToken } = createSession(res, sessionUser);
-    recordAudit(req, 'auth.register', { username: sessionUser.username, role: sessionUser.role });
-    json(res, 201, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
-  } catch (error) {
-    json(res, 400, { ok: false, error: error.message });
-  }
+const updatePaymentStatus = (payment, status, extra = {}) => {
+  payment.status = status;
+  payment.updatedAt = new Date().toISOString();
+  payment.history = payment.history || [];
+  payment.history.push({ status, at: payment.updatedAt, ...extra });
 };
 
-const handleLogin = async (req, res) => {
-  metrics.authLogin += 1;
-  if (!enforceRateLimit(req, res, authRateBuckets, 'auth-login', AUTH_RATE_LIMIT_WINDOW_MS, AUTH_RATE_LIMIT_MAX)) return;
-
-  try {
-    const body = await readBody(req);
-    const username = String(body.username || '').trim();
-    const password = String(body.password || '');
-    const accessCode = String(body.accessCode || '').trim();
-
-    const users = readUsers();
-    const user = users.find((item) => item.username.toLowerCase() === username.toLowerCase());
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-      json(res, 401, { ok: false, error: 'Invalid credentials' });
-      return;
-    }
-
-    if (accessCode && ROLE_ELEVATION_CODE && accessCode === ROLE_ELEVATION_CODE && user.role === 'member') {
-      user.role = 'analyst';
-      saveUsers(users);
-    }
-
-    recalcUserScore(user);
-    saveUsers(users);
-
-    const sessionUser = toSessionPublicUser(user);
-    const { cookie, csrfToken } = createSession(res, sessionUser);
-    recordAudit(req, 'auth.login', { username: sessionUser.username, role: sessionUser.role });
-    json(res, 200, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
-  } catch (error) {
-    json(res, 400, { ok: false, error: error.message });
-  }
+const verifyTxHashWithProvider = async (txHash) => {
+  const valid = /^[a-fA-F0-9]{32,128}$/.test(txHash);
+  return { verified: valid, provider: 'simulated_ton_provider', checkedAt: new Date().toISOString() };
 };
 
-const handleSession = (req, res) => {
-  const auth = getSessionState(req);
-  if (!auth) {
-    json(res, 200, { ok: true, session: null });
-    return;
-  }
-  json(res, 200, { ok: true, session: { ...auth.state.user, csrfToken: auth.state.csrfToken } });
-};
-
-const handleLogout = (req, res) => {
-  const auth = requireCsrf(req, res);
-  if (!auth) return;
-  sessions.delete(auth.sid);
-  recordAudit(req, 'auth.logout', { username: auth.state.user.username });
-  const securePart = COOKIE_SECURE ? '; Secure' : '';
-  json(res, 200, { ok: true }, { 'Set-Cookie': `sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${securePart}` });
-};
-
-const handlePublicRuntime = (_req, res) => {
-  json(res, 200, {
-    ok: true,
-    payments: { telegram_usdt: { recipient: TELEGRAM_BOT_USERNAME, wallet: TON_WALLET_ADDRESS } },
-    legal: { consentRequired: CONSENT_REQUIRED, retentionDays: RETENTION_DAYS },
-    infra: {
-      postgresConfigured: Boolean(DATABASE_URL),
-      redisConfigured: Boolean(REDIS_URL)
-    }
-  });
-};
-
-const handleGetConsent = (req, res) => {
-  const auth = requireAuth(req, res);
-  if (!auth) return;
-  json(res, 200, { ok: true, consent: auth.state.user.consent || { telemetry: true, marketing: false } });
-};
-
-const handleSetConsent = async (req, res) => {
-  const auth = requireCsrf(req, res);
-  if (!auth) return;
-
-  try {
-    const body = await readBody(req);
-    const telemetry = Boolean(body.telemetry);
-    const marketing = Boolean(body.marketing);
-    const users = readUsers();
-    const user = users.find((u) => u.id === auth.state.user.id);
-    if (!user) {
-      json(res, 404, { ok: false, error: 'User not found' });
-      return;
-    }
-
-    user.consent = { telemetry, marketing };
-    saveUsers(users);
-    auth.state.user = toSessionPublicUser(user);
-    recordAudit(req, 'user.consent.update', { username: user.username, consent: user.consent });
-    json(res, 200, { ok: true, consent: user.consent });
-  } catch (error) {
-    json(res, 400, { ok: false, error: error.message });
-  }
-};
-
-const handleTelemetryCollect = async (req, res) => {
-  metrics.telemetryCollect += 1;
-  if (!TELEMETRY_ENABLED) {
-    json(res, 200, { ok: true, telemetryEnabled: false });
-    return;
-  }
-
-  try {
-    const body = await readBody(req);
-    const sessionUser = getSessionUser(req);
-    if (CONSENT_REQUIRED && sessionUser && sessionUser.consent && sessionUser.consent.telemetry === false) {
-      json(res, 200, { ok: true, skipped: 'consent_disabled' });
-      return;
-    }
-
-    const record = {
-      id: crypto.randomUUID(),
-      event: String(body.event || 'unknown').slice(0, 200),
-      user: sessionUser ? { id: sessionUser.id, username: sessionUser.username, role: sessionUser.role } : null,
-      page: body.page || null,
-      client: body.client || null,
-      extra: body.extra || null,
-      server: collectServerContext(req)
-    };
-
-    appendNdjson(TELEMETRY_FILE, record);
-    json(res, 200, { ok: true, id: record.id });
-  } catch (error) {
-    json(res, 400, { ok: false, error: error.message });
-  }
+const classifyTelemetry = (event) => {
+  if (String(event).includes('login') || String(event).includes('register')) return 'auth_pii';
+  return 'behavior_non_pii';
 };
 
 const parseNdjson = (filePath) => {
@@ -525,48 +327,132 @@ const parseNdjson = (filePath) => {
     .filter(Boolean);
 };
 
-const handleTelemetrySummary = (req, res) => {
-  const auth = requirePermission(req, res, 'telemetry:view');
-  if (!auth) return;
-
-  const parsed = parseNdjson(TELEMETRY_FILE);
-  json(res, 200, {
-    ok: true,
-    requestedBy: auth.state.user.username,
-    totalEvents: parsed.length,
-    uniqueUsers: new Set(parsed.map((item) => item.user?.username).filter(Boolean)).size,
-    lastEvents: parsed.slice(-10)
+const cleanupOldNdjson = (filePath, days) => {
+  if (!fs.existsSync(filePath)) return;
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const kept = parseNdjson(filePath).filter((item) => {
+    const ts = Date.parse(item?.server?.collectedAt || item?.createdAt || '');
+    return Number.isFinite(ts) ? ts >= cutoff : true;
   });
+  fs.writeFileSync(filePath, `${kept.map((x) => JSON.stringify(x)).join('\n')}${kept.length ? '\n' : ''}`);
 };
 
-const handleCreateCryptoPayment = async (req, res) => {
-  metrics.paymentCreate += 1;
-  if (!enforceRateLimit(req, res, paymentsRateBuckets, 'payments-create', PAYMENTS_RATE_LIMIT_WINDOW_MS, PAYMENTS_RATE_LIMIT_MAX)) return;
+const runReconcile = () => {
+  metrics.reconcileRuns += 1;
+  const payments = readPayments();
+  let changed = 0;
+  const cutoff = Date.now() - INVOICE_TTL_SEC * 1000;
+  payments.forEach((payment) => {
+    if (!['draft', 'pending_chain', 'pending_onchain'].includes(payment.status)) return;
+    const createdTs = Date.parse(payment.createdAt || '');
+    if (Number.isFinite(createdTs) && createdTs < cutoff) {
+      updatePaymentStatus(payment, 'expired', { reason: 'ttl_expired' });
+      changed += 1;
+    }
+  });
+  if (changed) savePayments(payments);
+  return { changed, total: payments.length };
+};
 
-  const auth = requireCsrf(req, res);
-  if (!auth) return;
+setInterval(() => {
+  const job = jobQueue.shift();
+  if (!job) return;
+  if (job.type === 'reconcile') {
+    runReconcile();
+    metrics.queueProcessed += 1;
+  }
+}, 3000).unref();
 
-  try {
+setInterval(() => {
+  for (const [sid, state] of sessions.entries()) {
+    if (!state || state.expiresAt <= now()) sessions.delete(sid);
+  }
+  cleanupOldNdjson(TELEMETRY_FILE, RETENTION_DAYS);
+  cleanupOldNdjson(AUDIT_FILE, RETENTION_DAYS);
+}, 60_000).unref();
+
+const authService = {
+  async register(req, res) {
+    metrics.authRegister += 1;
     const body = await readBody(req);
-    const amount = Number(body.amount);
-    const idempotencyKey = String(body.idempotencyKey || req.headers['idempotency-key'] || '').trim();
+    const username = String(body.username || '').trim();
+    if (!enforceRateLimit(req, res, authRateBuckets, 'auth-register', AUTH_RATE_LIMIT_WINDOW_MS, AUTH_RATE_LIMIT_MAX, username.toLowerCase())) return;
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      json(res, 400, { ok: false, error: 'amount must be a positive number' });
-      return;
-    }
-    if (!idempotencyKey || idempotencyKey.length < 8) {
-      json(res, 400, { ok: false, error: 'idempotencyKey is required (min 8 chars)' });
-      return;
-    }
+    const password = String(body.password || '');
+    const telegram = String(body.telegram || '').trim().replace(/^@/, '');
+    const inviteToken = String(body.accessCode || '').trim();
+
+    if (!username || !USERNAME_RE.test(username)) return json(res, 400, { ok: false, error: 'Username must be 3-32 chars: letters, numbers, underscore' });
+    if (!password || password.length < 8) return json(res, 400, { ok: false, error: 'Password too short (min 8)' });
+
+    const users = readUsers();
+    if (users.some((u) => u.username.toLowerCase() === username.toLowerCase())) return json(res, 409, { ok: false, error: 'User already exists' });
+
+    const invite = consumeInviteToken(inviteToken);
+    const role = invite?.role || 'member';
+
+    const user = {
+      id: crypto.randomUUID(),
+      username,
+      telegram,
+      role,
+      score: 0,
+      consent: { telemetry: true, marketing: false },
+      passwordHash: createPasswordHash(password),
+      passwordChangedAt: new Date().toISOString(),
+      passwordHistory: [],
+      createdAt: new Date().toISOString()
+    };
+    users.push(user);
+    saveUsers(users);
+
+    const sessionUser = toSessionPublicUser(user);
+    const { cookie, csrfToken } = createSession(res, sessionUser);
+    recordAudit(req, 'auth.register', { username: sessionUser.username, role: sessionUser.role });
+    json(res, 201, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
+  },
+
+  async login(req, res) {
+    metrics.authLogin += 1;
+    const body = await readBody(req);
+    const username = String(body.username || '').trim();
+    if (!enforceRateLimit(req, res, authRateBuckets, 'auth-login', AUTH_RATE_LIMIT_WINDOW_MS, AUTH_RATE_LIMIT_MAX, username.toLowerCase())) return;
+
+    const password = String(body.password || '');
+    const inviteToken = String(body.accessCode || '').trim();
+    const users = readUsers();
+    const user = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
+    if (!user || !verifyPassword(password, user.passwordHash)) return json(res, 401, { ok: false, error: 'Invalid credentials' });
+
+    const invite = consumeInviteToken(inviteToken);
+    if (invite && user.role === 'member') user.role = invite.role || 'analyst';
+    recalcUserScore(user);
+    saveUsers(users);
+
+    const sessionUser = toSessionPublicUser(user);
+    const { cookie, csrfToken } = createSession(res, sessionUser);
+    recordAudit(req, 'auth.login', { username: sessionUser.username, role: sessionUser.role });
+    json(res, 200, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
+  }
+};
+
+const paymentService = {
+  async create(req, res) {
+    metrics.paymentCreate += 1;
+    if (!enforceRateLimit(req, res, paymentsRateBuckets, 'payments-create', PAYMENTS_RATE_LIMIT_WINDOW_MS, PAYMENTS_RATE_LIMIT_MAX)) return;
+    const auth = requireCsrf(req, res);
+    if (!auth) return;
+
+    const body = await readBody(req);
+    const amountRub = Number(body.amount);
+    const idempotencyKey = String(body.idempotencyKey || req.headers['idempotency-key'] || '').trim();
+    if (!Number.isFinite(amountRub) || amountRub <= 0) return json(res, 400, { ok: false, error: 'amount must be a positive number' });
+    if (!idempotencyKey || idempotencyKey.length < 8) return json(res, 400, { ok: false, error: 'idempotencyKey is required (min 8 chars)' });
 
     const payments = readPayments();
-    const existing = payments.find(
-      (p) => p.createdBy?.id === auth.state.user.id && p.idempotencyKey === idempotencyKey
-    );
-
+    const existing = payments.find((p) => p.createdBy?.id === auth.state.user.id && p.idempotencyKey === idempotencyKey);
     if (existing) {
-      json(res, 200, {
+      return json(res, 200, {
         ok: true,
         reused: true,
         paymentId: existing.paymentId,
@@ -576,26 +462,26 @@ const handleCreateCryptoPayment = async (req, res) => {
         recipient: existing.recipient,
         wallet: existing.wallet
       });
-      return;
     }
 
     const paymentId = crypto.randomUUID();
     const description = String(body.description || 'Пополнение счёта').slice(0, 200);
-    const usernameWithoutAt = TELEGRAM_BOT_USERNAME.replace(/^@/, '');
-    const deepLinkText = encodeURIComponent(`Оплата ${amount.toFixed(2)} RUB | ${description} | ${paymentId}`);
-    const deepLink = `https://t.me/${usernameWithoutAt}?start=${deepLinkText}`;
+    const amountUsdt = (amountRub / USDT_RATE_RUB).toFixed(2);
+    const deepLink = `https://t.me/${TELEGRAM_BOT_USERNAME.replace(/^@/, '')}?start=${encodeURIComponent(`pay_${paymentId}_${amountRub.toFixed(2)}`)}`;
 
     const payment = {
       paymentId,
       idempotencyKey,
-      amount: amount.toFixed(2),
+      amountRub: amountRub.toFixed(2),
+      amountUsdt,
+      rateRubUsdt: USDT_RATE_RUB,
       method: 'telegram_usdt',
       network: 'TON / USDT (TON)',
       recipient: TELEGRAM_BOT_USERNAME,
       wallet: TON_WALLET_ADDRESS,
       deepLink,
-      status: 'pending_onchain',
-      history: [{ status: 'pending_onchain', at: new Date().toISOString() }],
+      status: 'draft',
+      history: [{ status: 'draft', at: new Date().toISOString() }],
       txHash: null,
       description,
       metadata: body.metadata || null,
@@ -605,55 +491,41 @@ const handleCreateCryptoPayment = async (req, res) => {
       server: collectServerContext(req)
     };
 
+    updatePaymentStatus(payment, 'pending_chain', { reason: 'invoice_issued' });
     payments.push(payment);
     savePayments(payments);
-    recordAudit(req, 'payment.create', { paymentId, username: auth.state.user.username, amount: payment.amount });
+    recordAudit(req, 'payment.create', { paymentId, username: auth.state.user.username, amountRub: payment.amountRub });
 
     json(res, 200, {
       ok: true,
       paymentId,
       status: payment.status,
-      method: payment.method,
       recipient: payment.recipient,
       wallet: payment.wallet,
       network: payment.network,
-      deepLink: payment.deepLink,
-      instructions: 'Переведите USDT в сети TON на кошелёк и отправьте tx-hash оператору в Telegram.'
+      amountUsdt: payment.amountUsdt,
+      rateRubUsdt: payment.rateRubUsdt,
+      deepLink: payment.deepLink
     });
-  } catch (error) {
-    json(res, 400, { ok: false, error: error.message });
-  }
-};
+  },
 
-const updatePaymentStatus = (payment, status, extra = {}) => {
-  payment.status = status;
-  payment.updatedAt = new Date().toISOString();
-  payment.history = payment.history || [];
-  payment.history.push({ status, at: payment.updatedAt, ...extra });
-};
-
-const handleConfirmOnchain = async (req, res) => {
-  const auth = requirePermission(req, res, 'payments:manage');
-  if (!auth) return;
-
-  try {
+  async confirmOnchain(req, res) {
+    const auth = requirePermission(req, res, 'payments:manage');
+    if (!auth) return;
     const body = await readBody(req);
     const paymentId = String(body.paymentId || '').trim();
     const txHash = String(body.txHash || '').trim();
-    if (!paymentId || !txHash) {
-      json(res, 400, { ok: false, error: 'paymentId and txHash are required' });
-      return;
-    }
+    if (!paymentId || !txHash) return json(res, 400, { ok: false, error: 'paymentId and txHash are required' });
+
+    const verify = await verifyTxHashWithProvider(txHash);
+    if (!verify.verified) return json(res, 400, { ok: false, error: 'txHash verification failed' });
 
     const payments = readPayments();
     const payment = payments.find((p) => p.paymentId === paymentId);
-    if (!payment) {
-      json(res, 404, { ok: false, error: 'Payment not found' });
-      return;
-    }
+    if (!payment) return json(res, 404, { ok: false, error: 'Payment not found' });
 
     payment.txHash = txHash;
-    updatePaymentStatus(payment, 'confirmed', { txHash, confirmedBy: auth.state.user.username });
+    updatePaymentStatus(payment, 'confirmed', { txHash, confirmedBy: auth.state.user.username, provider: verify.provider });
     savePayments(payments);
     recordAudit(req, 'payment.confirm_onchain', { paymentId, txHash, by: auth.state.user.username });
 
@@ -663,38 +535,250 @@ const handleConfirmOnchain = async (req, res) => {
       recalcUserScore(user);
       saveUsers(users);
       for (const state of sessions.values()) {
-        if (state.user.id === user.id) {
-          state.user = toSessionPublicUser(user);
-        }
+        if (state.user.id === user.id) state.user = toSessionPublicUser(user);
       }
     }
 
-    json(res, 200, { ok: true, paymentId, status: payment.status, txHash });
-  } catch (error) {
-    json(res, 400, { ok: false, error: error.message });
+    json(res, 200, { ok: true, paymentId, status: payment.status, txHash, verification: verify });
   }
 };
 
-const handleReconcile = (_req, res) => {
-  metrics.reconcileRuns += 1;
-  const payments = readPayments();
-  const nowTs = Date.now();
-  let changed = 0;
+const telemetryService = {
+  async collect(req, res) {
+    metrics.telemetryCollect += 1;
+    if (!TELEMETRY_ENABLED) return json(res, 200, { ok: true, telemetryEnabled: false });
+    const body = await readBody(req);
+    const sessionUser = getSessionUser(req);
 
-  payments.forEach((payment) => {
-    if (payment.status !== 'pending_onchain') return;
-    const createdTs = Date.parse(payment.createdAt || '');
-    if (Number.isFinite(createdTs) && nowTs - createdTs > 3 * 24 * 60 * 60 * 1000) {
-      updatePaymentStatus(payment, 'expired');
-      changed += 1;
+    if (CONSENT_REQUIRED && sessionUser?.consent?.telemetry === false) {
+      return json(res, 200, { ok: true, skipped: 'consent_disabled' });
     }
-  });
 
-  if (changed) {
-    savePayments(payments);
+    const event = String(body.event || 'unknown').slice(0, 200);
+    if (!EVENT_RE.test(event)) return json(res, 400, { ok: false, error: 'Invalid event format' });
+
+    const record = {
+      id: crypto.randomUUID(),
+      version: Number(body.version || 1),
+      piiClass: classifyTelemetry(event),
+      event,
+      user: sessionUser ? { id: sessionUser.id, username: sessionUser.username, role: sessionUser.role } : null,
+      page: body.page || null,
+      client: body.client || null,
+      extra: body.extra || null,
+      server: collectServerContext(req)
+    };
+
+    appendNdjson(TELEMETRY_FILE, record);
+    json(res, 200, { ok: true, id: record.id });
   }
+};
 
-  json(res, 200, { ok: true, changed, total: payments.length });
+const handleSession = (req, res) => {
+  const auth = getSessionState(req);
+  if (!auth) return json(res, 200, { ok: true, session: null });
+  json(res, 200, { ok: true, session: { ...auth.state.user, csrfToken: auth.state.csrfToken } });
+};
+
+const handleLogout = (req, res) => {
+  const auth = requireCsrf(req, res);
+  if (!auth) return;
+  sessions.delete(auth.sid);
+  recordAudit(req, 'auth.logout', { username: auth.state.user.username });
+  const securePart = COOKIE_SECURE ? '; Secure' : '';
+  json(res, 200, { ok: true }, { 'Set-Cookie': `sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${securePart}` });
+};
+
+const handlePublicRuntime = (_req, res) => {
+  json(res, 200, {
+    ok: true,
+    payments: { telegram_usdt: { recipient: TELEGRAM_BOT_USERNAME, wallet: TON_WALLET_ADDRESS } },
+    legal: { consentRequired: CONSENT_REQUIRED, retentionDays: RETENTION_DAYS },
+    infra: { postgresConfigured: Boolean(DATABASE_URL), redisConfigured: Boolean(REDIS_URL) }
+  });
+};
+
+const handleGetConsent = (req, res) => {
+  const auth = requireAuth(req, res);
+  if (!auth) return;
+  json(res, 200, { ok: true, consent: auth.state.user.consent || { telemetry: true, marketing: false } });
+};
+
+const handleSetConsent = async (req, res) => {
+  const auth = requireCsrf(req, res);
+  if (!auth) return;
+  const body = await readBody(req);
+  const users = readUsers();
+  const user = users.find((u) => u.id === auth.state.user.id);
+  if (!user) return json(res, 404, { ok: false, error: 'User not found' });
+  user.consent = { telemetry: Boolean(body.telemetry), marketing: Boolean(body.marketing) };
+  saveUsers(users);
+  auth.state.user = toSessionPublicUser(user);
+  recordAudit(req, 'user.consent.update', { username: user.username, consent: user.consent });
+  json(res, 200, { ok: true, consent: user.consent });
+};
+
+const handleTelemetrySummary = (req, res) => {
+  const auth = requirePermission(req, res, 'telemetry:view');
+  if (!auth) return;
+  const events = parseNdjson(TELEMETRY_FILE);
+  json(res, 200, {
+    ok: true,
+    requestedBy: auth.state.user.username,
+    totalEvents: events.length,
+    uniqueUsers: new Set(events.map((e) => e.user?.username).filter(Boolean)).size,
+    lastEvents: events.slice(-10)
+  });
+};
+
+const handleAdminTelemetry = (req, res) => {
+  const auth = requirePermission(req, res, 'telemetry:view');
+  if (!auth) return;
+  const events = parseNdjson(TELEMETRY_FILE);
+  const counts = events.reduce((acc, e) => {
+    acc[e.event] = (acc[e.event] || 0) + 1;
+    return acc;
+  }, {});
+
+  const funnel = {
+    register: counts.register_success || 0,
+    login: counts.login_success || 0,
+    firstPayment: counts.payment_submit_success || 0,
+    repeatPayment: Math.max(0, (counts.payment_submit_success || 0) - 1)
+  };
+
+  json(res, 200, {
+    ok: true,
+    total: events.length,
+    topEvents: Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10),
+    funnel
+  });
+};
+
+const handleAdminAnomalies = (req, res) => {
+  const auth = requirePermission(req, res, 'telemetry:view');
+  if (!auth) return;
+  const events = parseNdjson(TELEMETRY_FILE);
+  const perIp = events.reduce((acc, e) => {
+    const ip = e?.server?.ip || 'unknown';
+    acc[ip] = (acc[ip] || 0) + 1;
+    return acc;
+  }, {});
+  const anomalies = Object.entries(perIp).filter(([, c]) => c >= 50).map(([ip, count]) => ({ ip, count, reason: 'burst_activity' }));
+  json(res, 200, { ok: true, anomalies });
+};
+
+const handleAdminUsers = (req, res) => {
+  const auth = requirePermission(req, res, 'users:manage');
+  if (!auth) return;
+  const users = readUsers().map((u) => ({ id: u.id, username: u.username, role: u.role, score: Number(u.score || 0), telegram: u.telegram || '', consent: u.consent || { telemetry: true, marketing: false }, createdAt: u.createdAt }));
+  json(res, 200, { ok: true, requestedBy: auth.state.user.username, total: users.length, users });
+};
+
+const handleAdminRoleUpdate = async (req, res) => {
+  const auth = requirePermission(req, res, 'users:manage');
+  if (!auth) return;
+  const body = await readBody(req);
+  const userId = String(body.userId || '').trim();
+  const role = String(body.role || '').trim();
+  if (!userId || !ROLE_PERMISSIONS[role]) return json(res, 400, { ok: false, error: 'Invalid userId or role' });
+  const users = readUsers();
+  const user = users.find((u) => u.id === userId);
+  if (!user) return json(res, 404, { ok: false, error: 'User not found' });
+  user.role = role;
+  saveUsers(users);
+  for (const state of sessions.values()) if (state.user.id === user.id) state.user = toSessionPublicUser(user);
+  recordAudit(req, 'admin.user_role_update', { by: auth.state.user.username, userId, role });
+  json(res, 200, { ok: true, user: toSessionPublicUser(user) });
+};
+
+const handleAdminInviteCreate = async (req, res) => {
+  const auth = requirePermission(req, res, 'users:manage');
+  if (!auth) return;
+  const body = await readBody(req);
+  const role = String(body.role || 'analyst');
+  if (!ROLE_PERMISSIONS[role]) return json(res, 400, { ok: false, error: 'Invalid role for invite' });
+  const ttlSec = Number(body.ttlSec || 24 * 60 * 60);
+  const invite = {
+    id: crypto.randomUUID(),
+    token: crypto.randomBytes(18).toString('hex'),
+    role,
+    createdBy: auth.state.user.username,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + ttlSec * 1000).toISOString(),
+    usedAt: null
+  };
+  const invites = readInvites();
+  invites.push(invite);
+  saveInvites(invites);
+  recordAudit(req, 'admin.invite.create', { by: auth.state.user.username, role, inviteId: invite.id });
+  json(res, 201, { ok: true, invite });
+};
+
+const handleAdminPayments = (req, res) => {
+  const auth = requirePermission(req, res, 'payments:manage');
+  if (!auth) return;
+  const query = new URL(req.url, `http://${req.headers.host}`);
+  const status = query.searchParams.get('status');
+  const payments = readPayments().filter((p) => (status ? p.status === status : true));
+  json(res, 200, { ok: true, total: payments.length, payments: payments.slice(-300).reverse() });
+};
+
+const handleAdminPaymentsExport = (_req, res) => {
+  const payments = readPayments();
+  const header = ['paymentId', 'status', 'amountRub', 'amountUsdt', 'createdBy', 'createdAt', 'updatedAt', 'txHash'];
+  const rows = [header.join(';')];
+  for (const p of payments) {
+    rows.push([
+      p.paymentId,
+      p.status,
+      p.amountRub,
+      p.amountUsdt,
+      p.createdBy?.username || '',
+      p.createdAt || '',
+      p.updatedAt || '',
+      p.txHash || ''
+    ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';'));
+  }
+  res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="payments.csv"', ...securityHeaders });
+  res.end(`${rows.join('\n')}\n`);
+};
+
+const handleWebhookTelegramPaymentConfirmed = async (req, res) => {
+  if (WEBHOOK_SECRET && req.headers['x-webhook-secret'] !== WEBHOOK_SECRET) return json(res, 403, { ok: false, error: 'Invalid webhook secret' });
+  const body = await readBody(req);
+  const paymentId = String(body.paymentId || '').trim();
+  const txHash = String(body.txHash || '').trim();
+  if (!paymentId || !txHash) return json(res, 400, { ok: false, error: 'paymentId and txHash required' });
+
+  const fakeReq = { ...req, headers: { ...req.headers, 'x-csrf-token': 'system' } };
+  const payments = readPayments();
+  const payment = payments.find((p) => p.paymentId === paymentId);
+  if (!payment) return json(res, 404, { ok: false, error: 'Payment not found' });
+
+  const verify = await verifyTxHashWithProvider(txHash);
+  if (!verify.verified) return json(res, 400, { ok: false, error: 'txHash verification failed' });
+
+  payment.txHash = txHash;
+  updatePaymentStatus(payment, 'confirmed', { txHash, source: 'telegram_webhook' });
+  savePayments(payments);
+  recordAudit(fakeReq, 'webhook.telegram.payment_confirmed', { paymentId, txHash });
+  json(res, 200, { ok: true, paymentId, status: payment.status });
+};
+
+const handleReconcile = (req, res) => {
+  const auth = requirePermission(req, res, 'payments:manage');
+  if (!auth) return;
+  const result = runReconcile();
+  recordAudit(req, 'jobs.reconcile.run', { by: auth.state.user.username, ...result });
+  json(res, 200, { ok: true, ...result });
+};
+
+const handleQueueReconcile = (req, res) => {
+  const auth = requirePermission(req, res, 'payments:manage');
+  if (!auth) return;
+  jobQueue.push({ id: crypto.randomUUID(), type: 'reconcile', enqueuedAt: new Date().toISOString(), by: auth.state.user.username });
+  json(res, 202, { ok: true, queued: true, size: jobQueue.length });
 };
 
 const handleHealth = (_req, res) => {
@@ -704,10 +788,8 @@ const handleHealth = (_req, res) => {
     sessionCount: sessions.size,
     telemetryEnabled: TELEMETRY_ENABLED,
     retentionDays: RETENTION_DAYS,
-    infra: {
-      postgresConfigured: Boolean(DATABASE_URL),
-      redisConfigured: Boolean(REDIS_URL)
-    }
+    queueSize: jobQueue.length,
+    infra: { postgresConfigured: Boolean(DATABASE_URL), redisConfigured: Boolean(REDIS_URL) }
   });
 };
 
@@ -725,90 +807,13 @@ const handleMetrics = (_req, res) => {
     `odkb_telemetry_collect_total ${metrics.telemetryCollect}`,
     '# TYPE odkb_reconcile_runs_total counter',
     `odkb_reconcile_runs_total ${metrics.reconcileRuns}`,
+    '# TYPE odkb_queue_processed_total counter',
+    `odkb_queue_processed_total ${metrics.queueProcessed}`,
     '# TYPE odkb_sessions gauge',
     `odkb_sessions ${sessions.size}`
   ];
   res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8', ...securityHeaders });
   res.end(`${lines.join('\n')}\n`);
-};
-
-const handleAdminUsers = (req, res) => {
-  const auth = requirePermission(req, res, 'users:manage');
-  if (!auth) return;
-
-  const users = readUsers().map((user) => ({
-    id: user.id,
-    username: user.username,
-    role: user.role,
-    score: Number(user.score || 0),
-    telegram: user.telegram || '',
-    consent: user.consent || { telemetry: true, marketing: false },
-    createdAt: user.createdAt
-  }));
-
-  json(res, 200, { ok: true, requestedBy: auth.state.user.username, total: users.length, users });
-};
-
-const handleAdminRoleUpdate = async (req, res) => {
-  const auth = requirePermission(req, res, 'users:manage');
-  if (!auth) return;
-
-  try {
-    const body = await readBody(req);
-    const userId = String(body.userId || '').trim();
-    const role = String(body.role || '').trim();
-    if (!userId || !ROLE_PERMISSIONS[role]) {
-      json(res, 400, { ok: false, error: 'Invalid userId or role' });
-      return;
-    }
-
-    const users = readUsers();
-    const user = users.find((u) => u.id === userId);
-    if (!user) {
-      json(res, 404, { ok: false, error: 'User not found' });
-      return;
-    }
-
-    user.role = role;
-    saveUsers(users);
-
-    for (const state of sessions.values()) {
-      if (state.user.id === user.id) {
-        state.user = toSessionPublicUser(user);
-      }
-    }
-
-    recordAudit(req, 'admin.user_role_update', { by: auth.state.user.username, userId, role });
-    json(res, 200, { ok: true, user: toSessionPublicUser(user) });
-  } catch (error) {
-    json(res, 400, { ok: false, error: error.message });
-  }
-};
-
-const handleAdminPayments = (req, res) => {
-  const auth = requirePermission(req, res, 'payments:manage');
-  if (!auth) return;
-
-  const payments = readPayments();
-  json(res, 200, { ok: true, total: payments.length, payments: payments.slice(-200).reverse() });
-};
-
-const handleAdminTelemetry = (req, res) => {
-  const auth = requirePermission(req, res, 'telemetry:view');
-  if (!auth) return;
-
-  const events = parseNdjson(TELEMETRY_FILE);
-  const byEvent = events.reduce((acc, item) => {
-    const key = item.event || 'unknown';
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
-  json(res, 200, {
-    ok: true,
-    total: events.length,
-    topEvents: Object.entries(byEvent).sort((a, b) => b[1] - a[1]).slice(0, 10)
-  });
 };
 
 const CONTENT_TYPES = {
@@ -828,54 +833,72 @@ const serveStatic = (req, res) => {
   const requestedPath = basePath === '/' ? '/index.html' : basePath;
   const safePath = path.normalize(requestedPath).replace(/^\.\.(\/|\\|$)/, '');
   const filePath = path.join(PUBLIC_DIR, safePath);
-
   if (!filePath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403, securityHeaders);
     res.end('Forbidden');
     return;
   }
-
   fs.readFile(filePath, (err, file) => {
     if (err) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...securityHeaders });
       res.end('Not Found');
       return;
     }
-
     const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, { 'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream', ...securityHeaders });
     res.end(file);
   });
 };
 
-const server = http.createServer((req, res) => {
+const normalizePath = (req) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if (url.pathname.startsWith('/api/v1/')) {
+    url.pathname = `/api/${url.pathname.slice('/api/v1/'.length)}`;
+    return `${url.pathname}${url.search}`;
+  }
+  return `${url.pathname}${url.search}`;
+};
+
+const server = http.createServer(async (req, res) => {
   metrics.requests += 1;
+  const route = normalizePath(req);
+  req.url = route;
 
-  if (req.method === 'GET' && req.url === '/api/health') return void handleHealth(req, res);
-  if (req.method === 'GET' && req.url === '/metrics') return void handleMetrics(req, res);
+  try {
+    if (req.method === 'GET' && route === '/api/health') return handleHealth(req, res);
+    if (req.method === 'GET' && route === '/metrics') return handleMetrics(req, res);
 
-  if (req.method === 'POST' && req.url === '/api/auth/register') return void handleRegister(req, res);
-  if (req.method === 'POST' && req.url === '/api/auth/login') return void handleLogin(req, res);
-  if (req.method === 'GET' && req.url === '/api/auth/session') return void handleSession(req, res);
-  if (req.method === 'POST' && req.url === '/api/auth/logout') return void handleLogout(req, res);
+    if (req.method === 'POST' && route === '/api/auth/register') return authService.register(req, res);
+    if (req.method === 'POST' && route === '/api/auth/login') return authService.login(req, res);
+    if (req.method === 'GET' && route === '/api/auth/session') return handleSession(req, res);
+    if (req.method === 'POST' && route === '/api/auth/logout') return handleLogout(req, res);
 
-  if (req.method === 'GET' && req.url === '/api/public/runtime') return void handlePublicRuntime(req, res);
-  if (req.method === 'GET' && req.url === '/api/user/consent') return void handleGetConsent(req, res);
-  if (req.method === 'POST' && req.url === '/api/user/consent') return void handleSetConsent(req, res);
+    if (req.method === 'GET' && route === '/api/public/runtime') return handlePublicRuntime(req, res);
+    if (req.method === 'GET' && route === '/api/user/consent') return handleGetConsent(req, res);
+    if (req.method === 'POST' && route === '/api/user/consent') return handleSetConsent(req, res);
 
-  if (req.method === 'POST' && req.url === '/api/payments/telegram-crypto/create') return void handleCreateCryptoPayment(req, res);
-  if (req.method === 'POST' && req.url === '/api/payments/confirm-onchain') return void handleConfirmOnchain(req, res);
-  if (req.method === 'POST' && req.url === '/api/jobs/reconcile') return void handleReconcile(req, res);
+    if (req.method === 'POST' && route === '/api/payments/telegram-crypto/create') return paymentService.create(req, res);
+    if (req.method === 'POST' && route === '/api/payments/confirm-onchain') return paymentService.confirmOnchain(req, res);
+    if (req.method === 'POST' && route === '/api/jobs/reconcile') return handleReconcile(req, res);
+    if (req.method === 'POST' && route === '/api/jobs/queue/reconcile') return handleQueueReconcile(req, res);
 
-  if (req.method === 'POST' && req.url === '/api/telemetry/collect') return void handleTelemetryCollect(req, res);
-  if (req.method === 'GET' && req.url === '/api/telemetry/summary') return void handleTelemetrySummary(req, res);
-  if (req.method === 'GET' && req.url === '/api/admin/telemetry') return void handleAdminTelemetry(req, res);
+    if (req.method === 'POST' && route === '/api/telemetry/collect') return telemetryService.collect(req, res);
+    if (req.method === 'GET' && route === '/api/telemetry/summary') return handleTelemetrySummary(req, res);
 
-  if (req.method === 'GET' && req.url === '/api/admin/users') return void handleAdminUsers(req, res);
-  if (req.method === 'POST' && req.url === '/api/admin/users/role') return void handleAdminRoleUpdate(req, res);
-  if (req.method === 'GET' && req.url === '/api/admin/payments') return void handleAdminPayments(req, res);
+    if (req.method === 'GET' && route === '/api/admin/users') return handleAdminUsers(req, res);
+    if (req.method === 'POST' && route === '/api/admin/users/role') return handleAdminRoleUpdate(req, res);
+    if (req.method === 'POST' && route === '/api/admin/invites') return handleAdminInviteCreate(req, res);
+    if (req.method === 'GET' && route.startsWith('/api/admin/payments/export')) return handleAdminPaymentsExport(req, res);
+    if (req.method === 'GET' && route.startsWith('/api/admin/payments')) return handleAdminPayments(req, res);
+    if (req.method === 'GET' && route === '/api/admin/telemetry') return handleAdminTelemetry(req, res);
+    if (req.method === 'GET' && route === '/api/admin/analytics/anomalies') return handleAdminAnomalies(req, res);
 
-  serveStatic(req, res);
+    if (req.method === 'POST' && route === '/api/webhooks/telegram/payment-confirmed') return handleWebhookTelegramPaymentConfirmed(req, res);
+
+    return serveStatic(req, res);
+  } catch (error) {
+    return json(res, 500, { ok: false, error: 'Internal server error', message: error.message });
+  }
 });
 
 server.listen(PORT, HOST, () => {

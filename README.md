@@ -1,69 +1,73 @@
-# ОДКБ — MVP+ backend platform
+# ОДКБ — MVP Platform (v1 API)
 
-Проект эволюционирует из демо в production-ready платформу: auth/ACL/payments/telemetry уже на backend + добавлены инфраструктурные и эксплуатационные блоки.
+Текущая версия — это уже platform-level MVP с backend-first архитектурой и базой под масштабирование.
 
-## Что уже реализовано в коде
+## Реализовано (по roadmap)
 
-- Backend auth + серверные сессии (TTL), CSRF, rate-limit, security headers.
-- RBAC (`member` / `analyst` / `admin`) и ACL на admin/telemetry/payments endpoint’ах.
-- Payment state machine (минимум): `pending_onchain -> confirmed | expired`.
-- Idempotency для создания платежей (`idempotencyKey`).
-- Audit log (`data/audit.log.ndjson`).
-- Consent endpoints (`/api/user/consent`) и retention cleanup задач для telemetry/audit логов.
-- Admin API: пользователи/роли, платежи, telemetry snapshot.
-- Health + Prometheus metrics endpoint (`/metrics`).
-- Integration smoke tests (`npm test`).
+### 1) Архитектура и масштабирование
+- API versioning: поддержка `/api/v1/...` (с backward-совместимостью `/api/...`).
+- Подготовка к Postgres + Redis через env wiring и docker-compose.
+- Background jobs queue (in-memory) + reconcile job endpoints.
+- Webhooks подсистема: Telegram payment confirmation webhook.
 
-## Что добавлено по инфраструктуре
+### 2) Auth / Security / ACL
+- Серверные сессии + CSRF header + SameSite cookies.
+- Session TTL + cleanup.
+- Rate-limit для auth/payments + brute-force защита по IP и username.
+- RBAC/ACL (`member`/`analyst`/`admin`) + audit лог админских действий.
+- Role elevation через одноразовые invite tokens (`/api/admin/invites`), а не общий статический код.
+- Security headers (CSP, X-Frame-Options, Referrer-Policy, etc.).
 
-- `docker-compose.yml` с `app + postgres + redis + prometheus`.
-- `ops/prometheus.yml` для скрейпа `/metrics`.
-- GitHub Actions CI (`.github/workflows/ci.yml`): `npm run check` + `npm test`.
-- Backup script: `npm run backup`.
-- Reconciliation job client script: `npm run reconcile` (с CSRF + cookie env).
+### 3) Платежи и финконтур
+- Payment state machine: `draft -> pending_chain -> confirmed/expired/refunded`.
+- Idempotency keys на create payment.
+- Rate фиксация RUB↔USDT при создании платежа.
+- TTL для инвойсов + reconcile (истечение pending/draft).
+- On-chain verification (provider abstraction + confirm endpoint).
+- Admin payment APIs + CSV export endpoint.
 
-## Как это соответствует roadmap
+### 4) Данные и аналитика
+- Event catalog baseline: regex-валидация event + version + piiClass.
+- Consent management API и UI (telemetry/marketing consent).
+- Retention policy cleanup по `RETENTION_DAYS`.
+- BI snapshot/funnels/anomalies endpoints для admin telemetry анализа.
+- Базовый user scoring по истории confirmed/refunded/expired платежей.
 
-### ✅ Postgres + Redis
-Добавлены `docker-compose` сервисы и env wiring (`DATABASE_URL`, `REDIS_URL`) для миграции storage слоя.
+### 5) Ops / Observability / CI/CD / Backups
+- `docker-compose.yml`: app + postgres + redis + prometheus.
+- `/metrics` в Prometheus формате + `ops/prometheus.yml`.
+- GitHub Actions CI (`check` + `test`).
+- Backup script и reconcile client script.
 
-### ✅ CSRF + rate limit + audit log
-Реализовано на backend (auth/payments).
+## Основные API (v1)
 
-### ✅ Payment state machine + idempotency
-Реализовано в `payments.json` + endpoint’ах create/confirm/reconcile.
+- Auth: `/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/session`, `/api/v1/auth/logout`
+- Consent: `/api/v1/user/consent`
+- Payments:
+  - `/api/v1/payments/telegram-crypto/create`
+  - `/api/v1/payments/confirm-onchain`
+  - `/api/v1/jobs/reconcile`
+  - `/api/v1/jobs/queue/reconcile`
+- Admin:
+  - `/api/v1/admin/users`
+  - `/api/v1/admin/users/role`
+  - `/api/v1/admin/invites`
+  - `/api/v1/admin/payments`
+  - `/api/v1/admin/payments/export`
+  - `/api/v1/admin/telemetry`
+  - `/api/v1/admin/analytics/anomalies`
+- Telemetry: `/api/v1/telemetry/collect`, `/api/v1/telemetry/summary`
+- Ops: `/api/v1/health`, `/metrics`
+- Webhooks: `/api/v1/webhooks/telegram/payment-confirmed`
 
-### ✅ Basic integration tests
-Реализовано в `tests/integration.test.mjs`.
-
-### ✅ Admin panel для ролей/платежей/телеметрии
-Добавлены admin API и UI секция в frontend.
-
-### ✅ Consent + retention policy
-Добавлены consent API и retention cleanup по дням.
-
-### ✅ BI/сквозная аналитика + скоринг (база)
-Добавлен telemetry snapshot endpoint + базовый score пользователя по истории подтверждённых/просроченных платежей.
-
-### ✅ Full CI/CD + observability + backups (базовый уровень)
-CI workflow, `/metrics`, `docker-compose`, backup/reconcile scripts.
-
-### ✅ Hardening security и комплаенс-пакет (базовый уровень)
-CSRF, rate-limit, security headers, audit trail, consent flags, retention.
-
-### ✅ On-chain verification и reconciliation jobs (базовый уровень)
-Добавлен endpoint подтверждения on-chain (`/api/payments/confirm-onchain`) и reconcile job (`/api/jobs/reconcile`).
-
-## Запуск локально
+## Запуск
 
 ```bash
 cp .env.example .env
 node server.js
 ```
 
-Открыть: <http://localhost:4173>
-
-## Проверки
+## Тестирование
 
 ```bash
 npm run check

@@ -86,7 +86,7 @@ test.after(async () => {
 });
 
 test('health endpoint works', async () => {
-  const res = await fetch(`${baseUrl}/api/health`);
+  const res = await fetch(`${baseUrl}/api/v1/health`);
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.ok, true);
@@ -185,6 +185,24 @@ test('admin login + csrf + protected endpoints', async () => {
   const teleBody = await tele.json();
   assert.equal(tele.status, 200);
   assert.equal(teleBody.skipped, 'consent_disabled');
+
+  const inviteRes = await fetch(`${baseUrl}/api/v1/admin/invites`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      'X-CSRF-Token': csrfToken
+    },
+    body: JSON.stringify({ role: 'analyst', ttlSec: 3600 })
+  });
+  assert.equal(inviteRes.status, 201);
+
+  const hook = await fetch(`${baseUrl}/api/v1/webhooks/telegram/payment-confirmed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paymentId: p1Body.paymentId, txHash: 'abcdef1234567890abcdef1234567890' })
+  });
+  assert.equal(hook.status, 200);
 
   const logoutRes = await fetch(`${baseUrl}/api/auth/logout`, {
     method: 'POST',
