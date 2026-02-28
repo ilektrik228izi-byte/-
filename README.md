@@ -73,3 +73,64 @@ node server.js
 npm run check
 npm test
 ```
+
+
+## Что ещё реализовать (большой backlog для серьёзного проекта)
+
+Ниже — идеи следующего масштаба, разбитые по направлениям.
+
+### Product / UX
+- Личный кабинет с timeline всех операций пользователя (платежи, KYC, обращения, уведомления).
+- Конструктор тарифов/подписок с периодическими платежами и trial-периодами.
+- Smart onboarding: чеклист пользователя + прогресс-бар до «полного доступа».
+- Мультиязычность интерфейса (RU/EN) + локализация форматирования сумм/дат.
+- Сценарии восстановления аккаунта (подтверждение устройства, fallback-контакты).
+
+### Security / Compliance
+- Refresh-token rotation + device/session management (список активных устройств).
+- MFA (TOTP/WebAuthn), step-up auth для чувствительных действий.
+- Risk engine для suspicious login/payment activity.
+- WAF-friendly request signatures + stricter webhook signature policies.
+- Полноценные DSR workflow states (open/in-review/approved/rejected/completed) + SLA.
+
+### Payments / Finance
+- Двусторонние webhooks по статусам платежей (created/confirmed/expired/refunded).
+- Retry orchestration для неустойчивых внешних провайдеров и dead-letter queue.
+- Возвраты/частичные возвраты с reason codes и контролем двойных refund.
+- Ledger-модель (double-entry) и сверка ledger↔операции↔балансы.
+- Поддержка нескольких сетей/активов с policy-маршрутизацией по комиссиям/риску.
+
+### Data / Analytics / AI
+- Data contract для всех событий telemetry (schema versioning + compatibility checks).
+- ETL в аналитическое хранилище + витрины для BI.
+- Event funnels/retention/cohort dashboards в admin UI.
+- Алгоритм динамического user scoring (поведение, фрод-сигналы, chargeback-like события).
+- Автоалерты по аномалиям (volume spikes, failure rates, geo anomalies).
+
+### Reliability / SRE
+- Миграция JSON persistence на Postgres + Redis adapters с транзакциями и блокировками.
+- Circuit breakers/timeouts/retries для внешних интеграций.
+- Health/readiness/liveness раздельно + dependency checks.
+- Chaos testing для очереди/вебхуков/провайдеров.
+- Runbooks и auto-remediation для типовых аварийных сценариев.
+
+### DevEx / Platform
+- OpenAPI spec + автогенерация клиентских SDK.
+- Contract tests (consumer-driven) между frontend/backend и внешними сервисами.
+- Feature flags + progressive rollout.
+- Полноценная staging среда с seed-данными и synthetic monitoring.
+- GitHub environments + protected deployments + release notes automation.
+
+### Admin / Operations
+- Расширенная админка: фильтры, bulk actions, audit diff view.
+- Ролевые политики granular RBAC (permission matrix + deny rules).
+- Очередь модерации тикетов с SLA таймерами и шаблонами ответов.
+- Центр уведомлений для админов (ошибки интеграций, превышения лимитов, фрод-флаги).
+- Отчёты по операционным метрикам: MTTR, queue latency, webhook success rate.
+
+### Документация и процессы
+- ADR (architecture decision records) по ключевым решениям.
+- Security playbook (incident response, key rotation, access reviews).
+- On-call handbook + escalation matrix.
+- Чёткая roadmap-сетка: now/next/later с критериями готовности.
+- Регулярный продуктово-технический RFC процесс для крупных фич.
