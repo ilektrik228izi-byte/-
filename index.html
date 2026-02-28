@@ -219,10 +219,43 @@
               <input name="description" value="Пополнение счёта" required />
             </label>
             <button id="payments-create-btn" class="btn" type="submit">Сформировать шаг оплаты</button>
+            <input type="hidden" name="idempotencyKey" id="payment-idempotency-key" />
             <button id="payments-copy-btn" class="btn secondary" type="button">Скопировать payload</button>
           </form>
         </div>
       </section>
+    
+      <section class="card hidden" id="admin-panel">
+        <h2>🛠️ Admin panel</h2>
+        <p class="muted">Управление ролями, платежами и телеметрией (только для admin).</p>
+        <div class="filters action-bar">
+          <button class="btn" type="button" id="admin-refresh">Обновить данные</button>
+          <button class="btn secondary" type="button" id="admin-reconcile">Reconcile payments</button>
+          <button class="btn secondary" type="button" id="admin-load-telemetry">Топ событий</button>
+        </div>
+        <div class="payments-grid">
+          <article>
+            <h3>Пользователи / роли</h3>
+            <ul id="admin-users" class="stat-list"></ul>
+          </article>
+          <article>
+            <h3>Платежи</h3>
+            <ul id="admin-payments" class="stat-list"></ul>
+          </article>
+          <article>
+            <h3>Telemetry BI snapshot</h3>
+            <ul id="admin-telemetry" class="stat-list"></ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="card" id="consent-panel">
+        <h2>🔐 Privacy / Consent</h2>
+        <label class="checkbox-label"><input type="checkbox" id="consent-telemetry" checked /> Разрешаю техническую телеметрию</label>
+        <label class="checkbox-label"><input type="checkbox" id="consent-marketing" /> Разрешаю маркетинговые коммуникации</label>
+        <button class="btn secondary" id="save-consent" type="button">Сохранить consent</button>
+      </section>
+
     </main>
 
     <dialog id="auth-dialog">

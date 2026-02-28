@@ -118,6 +118,17 @@ const paymentsForm = document.getElementById("payments-form");
 const paymentsMethod = document.getElementById("payments-method");
 const paymentsCreateBtn = document.getElementById("payments-create-btn");
 const paymentsCopyBtn = document.getElementById("payments-copy-btn");
+const paymentIdempotencyKeyInput = document.getElementById("payment-idempotency-key");
+const adminPanel = document.getElementById("admin-panel");
+const adminRefreshBtn = document.getElementById("admin-refresh");
+const adminReconcileBtn = document.getElementById("admin-reconcile");
+const adminLoadTelemetryBtn = document.getElementById("admin-load-telemetry");
+const adminUsersNode = document.getElementById("admin-users");
+const adminPaymentsNode = document.getElementById("admin-payments");
+const adminTelemetryNode = document.getElementById("admin-telemetry");
+const consentTelemetry = document.getElementById("consent-telemetry");
+const consentMarketing = document.getElementById("consent-marketing");
+const saveConsentBtn = document.getElementById("save-consent");
 const coinGameStart = document.getElementById("coin-game-start");
 const coinGameTime = document.getElementById("coin-game-time");
 const coinGameScore = document.getElementById("coin-game-score");
@@ -313,6 +324,92 @@ const getPaymentMethodConfig = () => {
   return { ...base, ...runtime };
 };
 
+
+const isAdmin = (session) => Array.isArray(session?.permissions) && session.permissions.includes("users:manage");
+
+const newIdempotencyKey = () => {
+  if (crypto?.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+const renderAdminPanelVisibility = () => {
+  adminPanel.classList.toggle("hidden", !isAdmin(getSession()));
+};
+
+const renderConsentState = (consent) => {
+  consentTelemetry.checked = consent?.telemetry !== false;
+  consentMarketing.checked = Boolean(consent?.marketing);
+};
+
+const loadConsentState = async () => {
+  const session = getSession();
+  if (!session) {
+    renderConsentState({ telemetry: true, marketing: false });
+    return;
+  }
+
+  try {
+    const data = await apiFetch("/api/user/consent", { method: "GET" });
+    renderConsentState(data.consent);
+  } catch {
+    renderConsentState(session.consent || { telemetry: true, marketing: false });
+  }
+};
+
+const loadAdminUsers = async () => {
+  if (!isAdmin(getSession())) return;
+  const data = await apiFetch("/api/admin/users", { method: "GET" });
+  adminUsersNode.innerHTML = "";
+  data.users.forEach((user) => {
+    const li = document.createElement("li");
+    const left = document.createElement("span");
+    left.textContent = `${user.username} • ${user.role} • score ${user.score}`;
+    const right = document.createElement("button");
+    right.className = "btn secondary";
+    right.type = "button";
+    right.textContent = user.role === "member" ? "↑ analyst" : user.role === "analyst" ? "↑ admin" : "—";
+    right.disabled = user.role === "admin";
+    right.addEventListener("click", async () => {
+      const nextRole = user.role === "member" ? "analyst" : "admin";
+      await apiFetch("/api/admin/users/role", {
+        method: "POST",
+        body: JSON.stringify({ userId: user.id, role: nextRole })
+      });
+      await loadAdminUsers();
+    });
+    li.append(left, right);
+    adminUsersNode.append(li);
+  });
+};
+
+const loadAdminPayments = async () => {
+  if (!isAdmin(getSession())) return;
+  const data = await apiFetch("/api/admin/payments", { method: "GET" });
+  adminPaymentsNode.innerHTML = "";
+  data.payments.slice(0, 20).forEach((payment) => {
+    const li = document.createElement("li");
+    const left = document.createElement("span");
+    left.textContent = `${payment.paymentId.slice(0, 6)}… ${payment.status}`;
+    const right = document.createElement("span");
+    right.textContent = `${payment.amount} ₽`;
+    li.append(left, right);
+    adminPaymentsNode.append(li);
+  });
+};
+
+const loadAdminTelemetry = async () => {
+  if (!isAdmin(getSession())) return;
+  const data = await apiFetch("/api/admin/telemetry", { method: "GET" });
+  adminTelemetryNode.innerHTML = "";
+  (data.topEvents || []).forEach(([name, count]) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${name}</span><span>${count}</span>`;
+    adminTelemetryNode.append(li);
+  });
+};
+
 const buildPaymentPayload = (amount, description) => {
   const session = getSession();
   const method = paymentsMethod.value;
@@ -322,6 +419,7 @@ const buildPaymentPayload = (amount, description) => {
     method,
     amount: Number(amount).toFixed(2),
     description,
+    idempotencyKey: String(paymentIdempotencyKeyInput.value || "").trim() || newIdempotencyKey(),
     recipient: config.recipient,
     metadata: {
       user: session?.username || "guest",
@@ -340,6 +438,7 @@ const renderPaymentsPrep = () => {
     ? `${config.recipient} • wallet: ${config.wallet}`
     : config.recipient;
   paymentsRecipient.textContent = recipientLabel || "не задан";
+  paymentIdempotencyKeyInput.value = newIdempotencyKey();
   paymentsCreateBtn.disabled = false;
   paymentsStatus.textContent = ready
     ? "✅ Сценарий подготовлен. Можно выдавать клиенту шаги оплаты."
@@ -758,6 +857,8 @@ const updateSessionUI = () => {
   authToggle.textContent = "Сменить аккаунт";
   coinGameStart.disabled = false;
   updateConfidentialUI();
+  renderAdminPanelVisibility();
+  loadConsentState();
 };
 
 const setAuthMode = (registerMode) => {
@@ -812,13 +913,31 @@ themeToggle.addEventListener("click", () => {
 paymentsForm.addEventListener("submit", handlePaymentSubmit);
 paymentsCopyBtn.addEventListener("click", copyPaymentPayload);
 paymentsMethod.addEventListener("change", renderPaymentsPrep);
+adminRefreshBtn?.addEventListener("click", async () => {
+  await loadAdminUsers();
+  await loadAdminPayments();
+});
+adminReconcileBtn?.addEventListener("click", async () => {
+  const data = await apiFetch("/api/jobs/reconcile", { method: "POST", body: JSON.stringify({}) });
+  alert(`Reconcile done. changed=${data.changed}`);
+  await loadAdminPayments();
+});
+adminLoadTelemetryBtn?.addEventListener("click", loadAdminTelemetry);
+saveConsentBtn?.addEventListener("click", async () => {
+  const data = await apiFetch("/api/user/consent", {
+    method: "POST",
+    body: JSON.stringify({ telemetry: consentTelemetry.checked, marketing: consentMarketing.checked })
+  });
+  alert("Consent сохранён");
+  renderConsentState(data.consent);
+});
 coinGameStart.addEventListener("click", () => {
   trackBehavior("coin_game_start");
   renderBehaviorStats();
   startCoinGame();
 });
 
-const grantWelcomeBonus = (username) => {
+const grantWelcomeBonus = async (username) => {
   const board = getBoard();
   board.deposits = board.deposits.filter((entry) => entry.username !== username);
   board.deposits.push({ username, amount: 100, isPublic: false });
@@ -826,6 +945,13 @@ const grantWelcomeBonus = (username) => {
   trackBehavior("welcome_bonus_granted");
   renderBoard();
   renderBehaviorStats();
+  renderAdminPanelVisibility();
+  if (isAdmin(currentSession)) {
+    await loadAdminUsers();
+    await loadAdminPayments();
+    await loadAdminTelemetry();
+  }
+  await loadConsentState();
 };
 
 authForm.addEventListener("submit", async (event) => {
@@ -849,7 +975,7 @@ authForm.addEventListener("submit", async (event) => {
       });
       currentSession = registerData.session;
       trackBehavior("register_success");
-      grantWelcomeBonus(username);
+      await grantWelcomeBonus(username);
       alert(`🎁 ${username}, вам начислен приветственный бонус 100 ₽ во вклад!`);
     } else {
       const loginData = await apiFetch("/api/auth/login", {
@@ -926,6 +1052,13 @@ const bootstrapApp = async () => {
   renderPaymentsPrep();
   renderCoinGameLeaderboard();
   renderBehaviorStats();
+  renderAdminPanelVisibility();
+  if (isAdmin(currentSession)) {
+    await loadAdminUsers();
+    await loadAdminPayments();
+    await loadAdminTelemetry();
+  }
+  await loadConsentState();
 };
 
 bootstrapApp();

@@ -134,11 +134,57 @@ test('admin login + csrf + protected endpoints', async () => {
       Cookie: cookie,
       'X-CSRF-Token': csrfToken
     },
-    body: JSON.stringify({ amount: 100, description: 'with-csrf' })
+    body: JSON.stringify({ amount: 100, description: 'with-csrf', idempotencyKey: 'initial-payment-12345' })
   });
   assert.equal(withCsrfPayment.status, 200);
   const paymentBody = await withCsrfPayment.json();
   assert.equal(paymentBody.ok, true);
+
+  const idem = 'idem-key-123456';
+  const p1 = await fetch(`${baseUrl}/api/payments/telegram-crypto/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      'X-CSRF-Token': csrfToken
+    },
+    body: JSON.stringify({ amount: 42, description: 'idem', idempotencyKey: idem })
+  });
+  const p1Body = await p1.json();
+  assert.equal(p1.status, 200);
+
+  const p2 = await fetch(`${baseUrl}/api/payments/telegram-crypto/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      'X-CSRF-Token': csrfToken
+    },
+    body: JSON.stringify({ amount: 42, description: 'idem', idempotencyKey: idem })
+  });
+  const p2Body = await p2.json();
+  assert.equal(p2.status, 200);
+  assert.equal(p2Body.paymentId, p1Body.paymentId);
+
+  const consentOff = await fetch(`${baseUrl}/api/user/consent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      'X-CSRF-Token': csrfToken
+    },
+    body: JSON.stringify({ telemetry: false, marketing: false })
+  });
+  assert.equal(consentOff.status, 200);
+
+  const tele = await fetch(`${baseUrl}/api/telemetry/collect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ event: 'test_event' })
+  });
+  const teleBody = await tele.json();
+  assert.equal(tele.status, 200);
+  assert.equal(teleBody.skipped, 'consent_disabled');
 
   const logoutRes = await fetch(`${baseUrl}/api/auth/logout`, {
     method: 'POST',

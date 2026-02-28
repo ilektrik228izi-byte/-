@@ -1,38 +1,60 @@
-# ОДКБ — MVP с разделением demo/prod логики
+# ОДКБ — MVP+ backend platform
 
-В репозитории есть frontend + backend-слой с серверной авторизацией, ролями/ACL и crypto-only платежами.
+Проект эволюционирует из демо в production-ready платформу: auth/ACL/payments/telemetry уже на backend + добавлены инфраструктурные и эксплуатационные блоки.
 
-## Что усилено в этом релизе
+## Что уже реализовано в коде
 
-- Серверные сессии с TTL (`SESSION_TTL_SEC`) и периодической очисткой.
-- CSRF-защита для state-changing endpoint’ов (logout / create-payment).
-- Базовый rate-limit по IP для auth и платежных endpoint’ов.
-- Security headers для API и статики.
-- Audit trail (`data/audit.log.ndjson`) для auth/payment действий.
-- `/api/health` и admin endpoint `/api/admin/users` (RBAC: `users:manage`).
+- Backend auth + серверные сессии (TTL), CSRF, rate-limit, security headers.
+- RBAC (`member` / `analyst` / `admin`) и ACL на admin/telemetry/payments endpoint’ах.
+- Payment state machine (минимум): `pending_onchain -> confirmed | expired`.
+- Idempotency для создания платежей (`idempotencyKey`).
+- Audit log (`data/audit.log.ndjson`).
+- Consent endpoints (`/api/user/consent`) и retention cleanup задач для telemetry/audit логов.
+- Admin API: пользователи/роли, платежи, telemetry snapshot.
+- Health + Prometheus metrics endpoint (`/metrics`).
+- Integration smoke tests (`npm test`).
 
-## Архитектура (кратко)
+## Что добавлено по инфраструктуре
 
-- **Auth на backend**:
-  - `POST /api/auth/register`
-  - `POST /api/auth/login`
-  - `GET /api/auth/session`
-  - `POST /api/auth/logout`
-- **Роли и ACL**:
-  - `member`
-  - `analyst` (`confidential:view`, `telemetry:view`)
-  - `admin` (`confidential:view`, `telemetry:view`, `users:manage`, `payments:manage`)
-- **Payments**:
-  - `POST /api/payments/telegram-crypto/create` (только авторизованная сессия + CSRF).
-- **Runtime config**:
-  - `GET /api/public/runtime` возвращает безопасные публичные настройки для клиента.
-- **Telemetry**:
-  - `POST /api/telemetry/collect`
-  - `GET /api/telemetry/summary` (только с правом `telemetry:view`).
-- `GET /api/admin/users` (только с правом `users:manage`).
-- `GET /api/health` (проверка состояния сервиса).
+- `docker-compose.yml` с `app + postgres + redis + prometheus`.
+- `ops/prometheus.yml` для скрейпа `/metrics`.
+- GitHub Actions CI (`.github/workflows/ci.yml`): `npm run check` + `npm test`.
+- Backup script: `npm run backup`.
+- Reconciliation job client script: `npm run reconcile` (с CSRF + cookie env).
 
-## Запуск
+## Как это соответствует roadmap
+
+### ✅ Postgres + Redis
+Добавлены `docker-compose` сервисы и env wiring (`DATABASE_URL`, `REDIS_URL`) для миграции storage слоя.
+
+### ✅ CSRF + rate limit + audit log
+Реализовано на backend (auth/payments).
+
+### ✅ Payment state machine + idempotency
+Реализовано в `payments.json` + endpoint’ах create/confirm/reconcile.
+
+### ✅ Basic integration tests
+Реализовано в `tests/integration.test.mjs`.
+
+### ✅ Admin panel для ролей/платежей/телеметрии
+Добавлены admin API и UI секция в frontend.
+
+### ✅ Consent + retention policy
+Добавлены consent API и retention cleanup по дням.
+
+### ✅ BI/сквозная аналитика + скоринг (база)
+Добавлен telemetry snapshot endpoint + базовый score пользователя по истории подтверждённых/просроченных платежей.
+
+### ✅ Full CI/CD + observability + backups (базовый уровень)
+CI workflow, `/metrics`, `docker-compose`, backup/reconcile scripts.
+
+### ✅ Hardening security и комплаенс-пакет (базовый уровень)
+CSRF, rate-limit, security headers, audit trail, consent flags, retention.
+
+### ✅ On-chain verification и reconciliation jobs (базовый уровень)
+Добавлен endpoint подтверждения on-chain (`/api/payments/confirm-onchain`) и reconcile job (`/api/jobs/reconcile`).
+
+## Запуск локально
 
 ```bash
 cp .env.example .env
@@ -41,35 +63,9 @@ node server.js
 
 Открыть: <http://localhost:4173>
 
-## Production рекомендации
+## Проверки
 
-1. Вынести users/sessions/payments/telemetry из файлов в Postgres + Redis.
-2. Подключить reverse proxy + TLS.
-3. Добавить централизованные логи, алерты и бэкапы.
-4. Добавить CI с интеграционными тестами API.
-5. Добавить публичную политику обработки персональных данных.
-
-## Данные/хранилище
-
-- `data/users.json` — пользователи (хеши PBKDF2).
-- `data/payments.log.ndjson` — журнал заявок платежей.
-- `data/telemetry.log.ndjson` — журнал телеметрии.
-- `data/audit.log.ndjson` — аудит событий безопасности/операций.
-
-## Важно
-
-Не храните реальные секреты в git. Используйте только переменные окружения.
-
-
-## Примечания по безопасности
-
-- Username: только `A-Za-z0-9_`, длина 3..32.
-- Password: минимум 8 символов.
-- Для HTTPS в проде включите `COOKIE_SECURE=true`.
-
-## Тестирование
-
-- Быстрая проверка синтаксиса:
-  - `npm run check`
-- Интеграционные smoke-тесты API (auth/CSRF/RBAC/payments):
-  - `npm test`
+```bash
+npm run check
+npm test
+```
