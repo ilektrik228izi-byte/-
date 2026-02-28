@@ -10,20 +10,20 @@ const STORAGE_KEYS = {
 const COMPANY_TURNOVER = 61612.55;
 
 const PAYMENTS_CONFIG = {
-  telegram_usdt: {
-    label: "Telegram-бот + крипта",
-    recipient: "@bot",
-    endpoint: "/api/payments/telegram-crypto/create",
-    network: "TON / USDT (TON)",
-    wallet: ""
+  wallet_ton: {
+    label: "@wallet — только TON",
+    recipient: "@wallet",
+    endpoint: "",
+    network: "TON",
+    wallet: "UQBu-4JdgbIdHIYqj2tUazFi9iQ3BIpypK-akdmbnT1KbO9Q"
   }
 };
 
 let runtimeConfig = {
   payments: {
-    telegram_usdt: {
-      recipient: "@username122333bot",
-      wallet: ""
+    wallet_ton: {
+      recipient: "@wallet",
+      wallet: "UQBu-4JdgbIdHIYqj2tUazFi9iQ3BIpypK-akdmbnT1KbO9Q"
     }
   }
 };
@@ -318,8 +318,8 @@ const sendTelemetry = (eventName, extra = null) => {
 };
 
 const getPaymentMethodConfig = () => {
-  const method = paymentsMethod.value || "telegram_usdt";
-  const base = PAYMENTS_CONFIG[method] || PAYMENTS_CONFIG.telegram_usdt;
+  const method = paymentsMethod.value || "wallet_ton";
+  const base = PAYMENTS_CONFIG[method] || PAYMENTS_CONFIG.wallet_ton;
   const runtime = runtimeConfig?.payments?.[method] || {};
   return { ...base, ...runtime };
 };
@@ -453,7 +453,7 @@ const copyPaymentPayload = async () => {
 
   try {
     await navigator.clipboard.writeText(text);
-    alert("Payload скопирован. Отправьте его оператору/боту.");
+    alert("Payload скопирован. Отправьте его в @wallet для TON-перевода.");
   } catch {
     alert("Не удалось скопировать автоматически. Payload выведен в консоль.");
     console.log("Payment payload:", text);
@@ -501,12 +501,7 @@ const handlePaymentSubmit = async (event) => {
       return;
     }
 
-    const botName = config.recipient.replace(/^@/, "");
-    const deepLink = `https://t.me/${botName}?start=pay_${encodeURIComponent(payload.amount)}`;
-    const walletPart = config.wallet ? `
-TON address: ${config.wallet}` : "";
-    alert(`Отправьте клиенту: сумма ${payload.amount} (${config.network}), бот ${config.recipient}.
-Deep link: ${deepLink}${walletPart}`);
+    alert(`Оплата вручную: отправьте ${payload.amount} ${config.network} на ${config.wallet}.\nКомментарий: ${payload.description || "без комментария"}`);
   } catch (error) {
     alert(error.message || "Не удалось создать платеж");
   }
@@ -705,9 +700,7 @@ const renderPublicTrustStats = () => {
   const roundedTurnover = Math.round(COMPANY_TURNOVER);
   publicTurnoverNode.textContent = `${new Intl.NumberFormat("ru-RU").format(roundedTurnover)} ₽`;
 
-  const avgDeal = loanRecords.length ? COMPANY_TURNOVER / loanRecords.length : 0;
-  const totalProfit = loanRecords.reduce((sum, row) => sum + (typeof row.earned === "number" ? row.earned : 0), 0);
-  publicExtraStatNode.textContent = `Средняя сделка: ${formatRub(avgDeal)} • Заработано для вас: ${formatRub(totalProfit)}`;
+  if (publicExtraStatNode) publicExtraStatNode.textContent = "";
 };
 
 const renderLoanBookStats = () => {

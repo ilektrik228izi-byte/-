@@ -383,3 +383,22 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+
+body.dark .access-lock {
+  border-color: #d6a53b;
+  background: #2b2414;
+}
+
+body.dark .access-lock h3,
+body.dark .access-lock p {
+  color: #f6d58f;
+}
+
+body.dark .trust-grid .kpi {
+  background: #1a2b43;
+}
+
+body.dark .trust-grid .kpi strong {
+  color: #f3f7ff;
+}
