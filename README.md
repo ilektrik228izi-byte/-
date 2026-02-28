@@ -134,3 +134,34 @@ npm test
 - On-call handbook + escalation matrix.
 - Чёткая roadmap-сетка: now/next/later с критериями готовности.
 - Регулярный продуктово-технический RFC процесс для крупных фич.
+
+
+## Cloudflare Workers: деплой и маршруты
+
+Если в Cloudflare Build Logs вы видите ошибку:
+`Could not detect a directory containing static files`,
+значит Wrangler запускался без явной конфигурации проекта.
+
+В этом репозитории это исправлено через:
+- `wrangler.toml` (явная конфигурация проекта)
+- `worker.js` (entrypoint Worker)
+- `assets` binding для раздачи `index.html`, `app.js`, `styles.css` и других статических файлов
+
+### Что и где будет доступно
+- Основной домен Worker: `https://bank1.ilektrik-228-izi.workers.dev`
+- Preview-URL: `https://<hash>-bank1.ilektrik-228-izi.workers.dev`
+
+### Маршруты
+- `/` и любые front-end маршруты → статические файлы (с SPA fallback на `index.html`)
+- `/api/*` → `501 Not Implemented` в Worker-сборке (пояснение в JSON),
+  потому что текущий backend (`server.js`) написан под Node HTTP runtime.
+
+### Команды деплоя
+```bash
+npx wrangler deploy
+```
+
+### Важно
+Cloudflare Worker в текущей конфигурации используется как static/frontend hosting.
+Backend API из `server.js` нужно деплоить отдельно в Node-среду (Docker/VM/Render/Fly/etc.)
+и затем проксировать/подключать к фронтенду по публичному API-URL.
