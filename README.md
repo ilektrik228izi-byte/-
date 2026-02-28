@@ -8,6 +8,8 @@
 - CSRF-защита для state-changing endpoint’ов (logout / create-payment).
 - Базовый rate-limit по IP для auth и платежных endpoint’ов.
 - Security headers для API и статики.
+- Audit trail (`data/audit.log.ndjson`) для auth/payment действий.
+- `/api/health` и admin endpoint `/api/admin/users` (RBAC: `users:manage`).
 
 ## Архитектура (кратко)
 
@@ -27,6 +29,8 @@
 - **Telemetry**:
   - `POST /api/telemetry/collect`
   - `GET /api/telemetry/summary` (только с правом `telemetry:view`).
+- `GET /api/admin/users` (только с правом `users:manage`).
+- `GET /api/health` (проверка состояния сервиса).
 
 ## Запуск
 
@@ -50,7 +54,15 @@ node server.js
 - `data/users.json` — пользователи (хеши PBKDF2).
 - `data/payments.log.ndjson` — журнал заявок платежей.
 - `data/telemetry.log.ndjson` — журнал телеметрии.
+- `data/audit.log.ndjson` — аудит событий безопасности/операций.
 
 ## Важно
 
 Не храните реальные секреты в git. Используйте только переменные окружения.
+
+
+## Примечания по безопасности
+
+- Username: только `A-Za-z0-9_`, длина 3..32.
+- Password: минимум 8 символов.
+- Для HTTPS в проде включите `COOKIE_SECURE=true`.

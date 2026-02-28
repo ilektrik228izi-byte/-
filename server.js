@@ -10,6 +10,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const TELEMETRY_FILE = path.join(DATA_DIR, 'telemetry.log.ndjson');
 const PAYMENTS_FILE = path.join(DATA_DIR, 'payments.log.ndjson');
+const AUDIT_FILE = path.join(DATA_DIR, 'audit.log.ndjson');
 
 const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || '@username122333bot';
 const TON_WALLET_ADDRESS = process.env.TON_WALLET_ADDRESS || '';
@@ -22,6 +23,7 @@ const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS |
 const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX || 20);
 const PAYMENTS_RATE_LIMIT_WINDOW_MS = Number(process.env.PAYMENTS_RATE_LIMIT_WINDOW_MS || 60_000);
 const PAYMENTS_RATE_LIMIT_MAX = Number(process.env.PAYMENTS_RATE_LIMIT_MAX || 40);
+const COOKIE_SECURE = String(process.env.COOKIE_SECURE || 'false').toLowerCase() === 'true';
 
 const ROLE_PERMISSIONS = {
   member: [],
@@ -39,6 +41,7 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const now = () => Date.now();
+const USERNAME_RE = /^[A-Za-z0-9_]{3,32}$/;
 
 const securityHeaders = {
   'X-Content-Type-Options': 'nosniff',
@@ -204,6 +207,16 @@ const appendNdjson = (filePath, payload) => {
   });
 };
 
+
+const recordAudit = (req, action, details = {}) => {
+  appendNdjson(AUDIT_FILE, {
+    id: crypto.randomUUID(),
+    action,
+    details,
+    server: collectServerContext(req)
+  });
+};
+
 const getSessionState = (req) => {
   const sid = parseCookies(req).sid;
   if (!sid) {
@@ -292,7 +305,8 @@ const createSession = (res, user) => {
   const csrfToken = crypto.randomBytes(24).toString('hex');
   const expiresAt = now() + SESSION_TTL_SEC * 1000;
   sessions.set(sid, { user, csrfToken, expiresAt });
-  const cookie = `sid=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SEC}`;
+  const securePart = COOKIE_SECURE ? '; Secure' : '';
+  const cookie = `sid=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SEC}${securePart}`;
   return { sid, csrfToken, cookie };
 };
 
@@ -308,11 +322,11 @@ const handleRegister = async (req, res) => {
     const telegram = String(body.telegram || '').trim().replace(/^@/, '');
     const accessCode = String(body.accessCode || '').trim();
 
-    if (!username || username.length < 3) {
-      json(res, 400, { ok: false, error: 'Username too short' });
+    if (!username || !USERNAME_RE.test(username)) {
+      json(res, 400, { ok: false, error: 'Username must be 3-32 chars: letters, numbers, underscore' });
       return;
     }
-    if (!password || password.length < 6) {
+    if (!password || password.length < 8) {
       json(res, 400, { ok: false, error: 'Password too short' });
       return;
     }
@@ -339,6 +353,7 @@ const handleRegister = async (req, res) => {
 
     const sessionUser = toSessionPublicUser(user);
     const { cookie, csrfToken } = createSession(res, sessionUser);
+    recordAudit(req, 'auth.register', { username: sessionUser.username, role: sessionUser.role });
     json(res, 201, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
   } catch (error) {
     json(res, 400, { ok: false, error: error.message });
@@ -370,6 +385,7 @@ const handleLogin = async (req, res) => {
 
     const sessionUser = toSessionPublicUser(user);
     const { cookie, csrfToken } = createSession(res, sessionUser);
+    recordAudit(req, 'auth.login', { username: sessionUser.username, role: sessionUser.role });
     json(res, 200, { ok: true, session: { ...sessionUser, csrfToken } }, { 'Set-Cookie': cookie });
   } catch (error) {
     json(res, 400, { ok: false, error: error.message });
@@ -393,7 +409,9 @@ const handleLogout = (req, res) => {
   }
 
   sessions.delete(auth.sid);
-  json(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' });
+  recordAudit(req, 'auth.logout', { username: auth.state.user.username });
+  const securePart = COOKIE_SECURE ? '; Secure' : '';
+  json(res, 200, { ok: true }, { 'Set-Cookie': `sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${securePart}` });
 };
 
 const handlePublicRuntime = (_req, res) => {
@@ -499,6 +517,7 @@ const handleCreateCryptoPayment = async (req, res) => {
     };
 
     appendNdjson(PAYMENTS_FILE, payment);
+    recordAudit(req, 'payment.create', { paymentId, username: auth.state.user.username, amount: payment.amount });
 
     const usernameWithoutAt = TELEGRAM_BOT_USERNAME.replace(/^@/, '');
     const deepLinkText = encodeURIComponent(`Оплата ${payment.amount} RUB | ${description} | ${paymentId}`);
@@ -517,6 +536,33 @@ const handleCreateCryptoPayment = async (req, res) => {
   } catch (error) {
     json(res, 400, { ok: false, error: error.message });
   }
+};
+
+
+const handleHealth = (_req, res) => {
+  json(res, 200, {
+    ok: true,
+    uptimeSec: Math.round(process.uptime()),
+    sessionCount: sessions.size,
+    telemetryEnabled: TELEMETRY_ENABLED
+  });
+};
+
+const handleAdminUsers = (req, res) => {
+  const auth = requirePermission(req, res, 'users:manage');
+  if (!auth) {
+    return;
+  }
+
+  const users = readUsers().map((user) => ({
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    telegram: user.telegram || '',
+    createdAt: user.createdAt
+  }));
+
+  json(res, 200, { ok: true, requestedBy: auth.state.user.username, total: users.length, users });
 };
 
 const CONTENT_TYPES = {
@@ -557,6 +603,11 @@ const serveStatic = (req, res) => {
 };
 
 const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/api/health') {
+    handleHealth(req, res);
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/auth/register') {
     handleRegister(req, res);
     return;
@@ -594,6 +645,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && req.url === '/api/telemetry/summary') {
     handleTelemetrySummary(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/admin/users') {
+    handleAdminUsers(req, res);
     return;
   }
 
