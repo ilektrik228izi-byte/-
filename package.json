@@ -8,6 +8,7 @@
     "check": "node --check app.js && node --check server.js",
     "test": "node --test tests/integration.test.mjs",
     "reconcile": "node scripts/reconcile_job.mjs",
-    "backup": "node scripts/backup_data.mjs"
+    "backup": "node scripts/backup_data.mjs",
+    "deploy:worker": "bash scripts/deploy_worker.sh"
   }
 }

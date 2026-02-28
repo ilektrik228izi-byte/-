@@ -158,10 +158,26 @@ npm test
 
 ### Команды деплоя
 ```bash
-npx wrangler deploy
+# рекомендуемый вариант (фиксирует корень репозитория и config)
+npm run deploy:worker
+
+# эквивалент
+bash scripts/deploy_worker.sh
 ```
+
+Если вы деплоите через Cloudflare Workers Builds, укажите в настройках проекта:
+- **Build command / Deploy command**: `npm run deploy:worker`
+- **Root directory**: корень репозитория (где лежит `wrangler.toml`)
 
 ### Важно
 Cloudflare Worker в текущей конфигурации используется как static/frontend hosting.
 Backend API из `server.js` нужно деплоить отдельно в Node-среду (Docker/VM/Render/Fly/etc.)
 и затем проксировать/подключать к фронтенду по публичному API-URL.
+
+
+### Частая ошибка и её причина
+Ошибка:
+`Could not detect a directory containing static files (e.g. html, css and js)`
+
+Обычно это значит, что `wrangler` стартовал **не из корня репозитория** или не увидел `wrangler.toml`.
+Скрипт `scripts/deploy_worker.sh` принудительно переходит в корень проекта и запускает deploy с `--config`.
